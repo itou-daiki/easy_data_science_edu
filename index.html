@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>easyDataScience - ブラウザ機械学習アプリ</title>
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+    <!-- Loading Screen -->
+    <div id="loading-screen" class="loading-screen">
+        <div class="loading-content">
+            <i class="fas fa-brain fa-3x"></i>
+            <h2>easyDataScience を読み込み中...</h2>
+            <p>機械学習エンジンの初期化をしています</p>
+            <p style="font-size: 0.875rem; color: #64748b; margin-top: 0.5rem;">
+                数秒で起動します
+            </p>
+            <div id="loading-error" style="color: red; margin-top: 1rem; display: none;"></div>
+            <div class="loading-spinner"></div>
+        </div>
+    </div>
+
+    <!-- Demo Data Selector Modal -->
+    <div id="demo-modal" class="modal">
+        <div class="modal-content demo-modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-database"></i> デモデータを選択</h3>
+                <span class="close-modal" id="close-demo-modal">&times;</span>
+            </div>
+            <p style="margin-bottom: 1.5rem; color: #64748b;">
+                分析目的に合わせたデータセットを選択してください。<br>
+                クリックするとデータが読み込まれます。
+            </p>
+
+            <div class="demo-options-grid">
+                <!-- 回帰用デモデータ -->
+                <button class="demo-option-btn primary" data-demo="regression_demo.csv">
+                    <div class="icon"><i class="fas fa-chart-line"></i></div>
+                    <div class="info">
+                        <strong>回帰分析用データ (推奨)</strong>
+                        <span>住宅価格予測データ・連続値の予測</span>
+                    </div>
+                </button>
+
+                <!-- 分類用デモデータ -->
+                <button class="demo-option-btn" data-demo="classification_demo.csv">
+                    <div class="icon"><i class="fas fa-tags"></i></div>
+                    <div class="info">
+                        <strong>分類分析用データ</strong>
+                        <span>顧客離反予測データ・カテゴリ分類</span>
+                    </div>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        window.addEventListener('error', function (event) {
+            const loadingScreen = document.getElementById('loading-screen');
+            if (loadingScreen && loadingScreen.style.display !== 'none') {
+                const errorDiv = document.getElementById('loading-error');
+                if (errorDiv) {
+                    errorDiv.style.display = 'block';
+                    errorDiv.innerHTML = `<strong>起動エラー:</strong><br>${event.message}`;
+                    console.error('Startup Error:', event.error);
+                }
+            }
+        });
+    </script>
+
+    <!-- Main Container -->
+    <div id="main-app" style="display: none;">
+        <!-- Hero Section -->
+        <div class="hero-section">
+            <h1 class="hero-title">easyDataScience</h1>
+            <p class="hero-caption">Created by Dit-Lab. (Daiki ITO)</p>
+            <p class="hero-subtitle">ブラウザ上で簡単に機械学習　- PyCaret ライクな自動 ML を手軽に -</p>
+        </div>
+
+        <!-- Data Upload Section -->
+        <div class="upload-section-main" id="upload-section-main">
+            <div class="upload-area" id="main-upload-area">
+                <div class="upload-info">
+                    <div class="upload-icon">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                    </div>
+                    <div>
+                        <h3>データファイルをアップロード</h3>
+                        <p class="upload-text">ここにファイルをドラッグ＆ドロップ</p>
+                    </div>
+                </div>
+                <div class="upload-buttons">
+                    <input type="file" id="main-data-file" accept=".xlsx,.xls,.csv" style="display: none;">
+                    <button class="btn-upload" id="main-upload-btn">
+                        <i class="fas fa-file-import"></i> ファイルを選択
+                    </button>
+                    <p class="upload-hint">または</p>
+                    <button class="btn-demo" id="load-demo-btn">デモデータを試す</button>
+                </div>
+            </div>
+            <div id="main-file-info" class="file-info" style="display: none;"></div>
+
+            <!-- Data Preview Section -->
+            <div id="data-preview-section" class="info-sections"
+                style="display: none; margin-top: -1rem; margin-bottom: 2rem;">
+                <div class="collapsible-section">
+                    <div class="collapsible-header collapsed">
+                        <h3><i class="fas fa-table"></i> データプレビュー</h3>
+                        <i class="fas fa-chevron-down toggle-icon"></i>
+                    </div>
+                    <div class="collapsible-content collapsed">
+                        <div id="dataframe-container" class="table-container"></div>
+                    </div>
+                </div>
+                <div class="collapsible-section">
+                    <div class="collapsible-header collapsed">
+                        <h3><i class="fas fa-chart-bar"></i> 要約統計量</h3>
+                        <i class="fas fa-chevron-down toggle-icon"></i>
+                    </div>
+                    <div class="collapsible-content collapsed">
+                        <div id="summary-stats-container" class="table-container"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Navigation Section -->
+        <div class="navigation-section" id="navigation-section">
+            <h2>分析機能を選択</h2>
+            <p class="navigation-subtitle">目的に合ったカテゴリから分析手法を選んでください</p>
+            <div class="feature-grid">
+
+                <!-- データの探索・前処理 -->
+                <div class="category-section category-eda">
+                    <div class="category-header">
+                        <div class="category-icon"><i class="fas fa-search"></i></div>
+                        <div class="category-info">
+                            <h3>データの探索・前処理</h3>
+                            <p>データの傾向を把握し、機械学習の前準備を行います</p>
+                        </div>
+                    </div>
+                    <div class="category-cards">
+                        <div class="feature-card" data-analysis="eda" data-requires="numeric:1">
+                            <h3 class="feature-card-title">
+                                <i class="fas fa-search feature-card-icon"></i>
+                                探索的データ分析 (EDA)
+                            </h3>
+                            <p class="feature-card-description">データの分布・相関・欠損値を可視化し、全体像を把握します</p>
+                            <p class="feature-card-requirement" style="display: none;">数値変数が1つ以上必要です</p>
+                        </div>
+
+                        <div class="feature-card" data-analysis="preprocessing" data-requires="numeric:1">
+                            <h3 class="feature-card-title">
+                                <i class="fas fa-cogs feature-card-icon"></i>
+                                データ前処理
+                            </h3>
+                            <p class="feature-card-description">欠損値補完・スケーリング・エンコーディングを自動で行います</p>
+                            <p class="feature-card-requirement" style="display: none;">数値変数が1つ以上必要です</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 回帰分析 -->
+                <div class="category-section category-prediction">
+                    <div class="category-header">
+                        <div class="category-icon"><i class="fas fa-chart-line"></i></div>
+                        <div class="category-info">
+                            <h3>回帰（連続値の予測）</h3>
+                            <p>数値の予測を行います。PyCaret のように複数モデルを自動比較できます</p>
+                        </div>
+                    </div>
+                    <div class="category-cards">
+                        <div class="feature-card" data-analysis="regression" data-requires="numeric:2">
+                            <h3 class="feature-card-title">
+                                <i class="fas fa-robot feature-card-icon"></i>
+                                回帰モデル比較 (AutoML)
+                            </h3>
+                            <p class="feature-card-description">複数の回帰モデルを一括で学習・比較し、最適なモデルを見つけます</p>
+                            <p class="feature-card-requirement" style="display: none;">数値変数が2つ以上必要です</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 分類分析 -->
+                <div class="category-section category-multivariate">
+                    <div class="category-header">
+                        <div class="category-icon"><i class="fas fa-tags"></i></div>
+                        <div class="category-info">
+                            <h3>分類（カテゴリの予測）</h3>
+                            <p>カテゴリ分類を行います。PyCaret のように複数モデルを自動比較できます</p>
+                        </div>
+                    </div>
+                    <div class="category-cards">
+                        <div class="feature-card" data-analysis="classification" data-requires="numeric:1">
+                            <h3 class="feature-card-title">
+                                <i class="fas fa-robot feature-card-icon"></i>
+                                分類モデル比較 (AutoML)
+                            </h3>
+                            <p class="feature-card-description">複数の分類モデルを一括で学習・比較し、最適なモデルを見つけます</p>
+                            <p class="feature-card-requirement" style="display: none;">数値変数が1つ以上必要です</p>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Analysis Header (back button) -->
+        <div id="analysis-header" class="analysis-header" style="display: none;">
+            <button onclick="backToHome()" class="btn-back">
+                <i class="fas fa-arrow-left"></i> 機能選択に戻る
+            </button>
+        </div>
+
+        <!-- Analysis Area -->
+        <div id="analysis-area" class="analysis-area" style="display: none;">
+            <div id="analysis-content"></div>
+        </div>
+
+        <!-- Info Sections -->
+        <div class="info-sections">
+            <div class="collapsible-section">
+                <div class="collapsible-header collapsed">
+                    <h3>
+                        <i class="fas fa-info-circle"></i>
+                        このアプリケーションについて
+                    </h3>
+                    <i class="fas fa-chevron-down toggle-icon"></i>
+                </div>
+                <div class="collapsible-content collapsed">
+                    <h4>easyDataScience - ブラウザ機械学習アプリ</h4>
+                    <p>
+                        <strong>easyDataScience</strong>は、ブラウザ上で動作する無料の機械学習Webアプリケーションです。
+                        PyCaret のように複数のモデルを自動比較し、最適なモデルを見つけることができます。
+                        すべての処理はブラウザ内で完結し、データが外部に送信されることはありません。
+                    </p>
+
+                    <h4>主な特徴</h4>
+                    <ul>
+                        <li><strong>完全ブラウザベース:</strong> インストール不要、Webブラウザだけで利用可能</li>
+                        <li><strong>データプライバシー:</strong> データはブラウザ内で処理され、外部サーバーに送信されません</li>
+                        <li><strong>AutoML機能:</strong> PyCaret のように複数モデルを自動で学習・比較</li>
+                        <li><strong>回帰・分類対応:</strong> 連続値予測とカテゴリ分類の両方に対応</li>
+                        <li><strong>日本語対応:</strong> UIと分析結果の解釈がすべて日本語</li>
+                        <li><strong>教育的:</strong> 機械学習手法の説明と結果の解釈を提供</li>
+                    </ul>
+
+                    <h4>搭載アルゴリズム</h4>
+                    <div class="analysis-methods-grid">
+                        <div class="method-item">
+                            <i class="fas fa-chart-line"></i>
+                            <span>線形回帰</span>
+                        </div>
+                        <div class="method-item">
+                            <i class="fas fa-shield-alt"></i>
+                            <span>Ridge / Lasso 回帰</span>
+                        </div>
+                        <div class="method-item">
+                            <i class="fas fa-tree"></i>
+                            <span>決定木</span>
+                        </div>
+                        <div class="method-item">
+                            <i class="fas fa-trees"></i>
+                            <span>ランダムフォレスト</span>
+                        </div>
+                        <div class="method-item">
+                            <i class="fas fa-bullseye"></i>
+                            <span>K近傍法 (KNN)</span>
+                        </div>
+                        <div class="method-item">
+                            <i class="fas fa-wave-square"></i>
+                            <span>サポートベクターマシン</span>
+                        </div>
+                        <div class="method-item">
+                            <i class="fas fa-sign-in-alt"></i>
+                            <span>ロジスティック回帰</span>
+                        </div>
+                        <div class="method-item">
+                            <i class="fas fa-percentage"></i>
+                            <span>ナイーブベイズ</span>
+                        </div>
+                        <div class="method-item">
+                            <i class="fas fa-layer-group"></i>
+                            <span>勾配ブースティング</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="collapsible-section">
+                <div class="collapsible-header collapsed">
+                    <h3>
+                        <i class="fas fa-question-circle"></i>
+                        使い方・操作方法
+                    </h3>
+                    <i class="fas fa-chevron-down toggle-icon"></i>
+                </div>
+                <div class="collapsible-content collapsed">
+                    <h4>基本的な使い方</h4>
+
+                    <div class="usage-step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h5>データをアップロード</h5>
+                            <p>Excel（.xlsx, .xls）またはCSVファイルを選択してください。ドラッグ＆ドロップにも対応しています。</p>
+                        </div>
+                    </div>
+
+                    <div class="usage-step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h5>分析タスクを選択</h5>
+                            <p>回帰（連続値予測）または分類（カテゴリ予測）を選択します。EDAで事前にデータを把握することもできます。</p>
+                        </div>
+                    </div>
+
+                    <div class="usage-step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h5>目的変数を選択</h5>
+                            <p>予測したい変数（目的変数）を選択すると、自動で前処理とモデル学習が行われます。</p>
+                        </div>
+                    </div>
+
+                    <div class="usage-step">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <h5>モデル比較結果を確認</h5>
+                            <p>PyCaret のように複数モデルの性能比較表が表示されます。最適なモデルの詳細評価やグラフも確認できます。</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="footer-content">
+                <p>&copy; 2022-2026 Dit-Lab.(Daiki Ito). All Rights Reserved.</p>
+                <p>easyDataScience: Open Source for Ubiquitous Machine Learning</p>
+                <p>Democratizing AI, everywhere.</p>
+                <div class="footer-links">
+                    <a href="https://github.com/itou-daiki/easy_data_science_edu" target="_blank">
+                        <i class="fab fa-github"></i> GitHub
+                    </a>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- JavaScript Libraries -->
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jstat@latest/dist/jstat.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.7.0/math.min.js"></script>
+
+    <!-- Custom JavaScript -->
+    <script type="module" src="js/main.js"></script>
+</body>
+
+</html>
