@@ -43,22 +43,52 @@
                 クリックするとデータが読み込まれます。
             </p>
 
+            <h4 style="margin: 0 0 0.75rem 0; color: #1e293b; font-size: 0.95rem;"><i class="fas fa-chart-line" style="color: #d97706; margin-right: 0.4rem;"></i>回帰（数値予測）</h4>
             <div class="demo-options-grid">
-                <!-- 回帰用デモデータ -->
                 <button class="demo-option-btn primary" data-demo="regression_demo.csv">
-                    <div class="icon"><i class="fas fa-chart-line"></i></div>
+                    <div class="icon"><i class="fas fa-home"></i></div>
                     <div class="info">
-                        <strong>回帰分析用データ (推奨)</strong>
-                        <span>住宅価格予測データ・連続値の予測</span>
+                        <strong>住宅価格データ (推奨)</strong>
+                        <span>150件・面積や築年数から価格を予測</span>
                     </div>
                 </button>
-
-                <!-- 分類用デモデータ -->
-                <button class="demo-option-btn" data-demo="classification_demo.csv">
-                    <div class="icon"><i class="fas fa-tags"></i></div>
+                <button class="demo-option-btn" data-demo="tips.csv">
+                    <div class="icon"><i class="fas fa-utensils"></i></div>
                     <div class="info">
-                        <strong>分類分析用データ</strong>
-                        <span>顧客離反予測データ・カテゴリ分類</span>
+                        <strong>チップデータ</strong>
+                        <span>244件・食事の合計金額からチップを予測</span>
+                    </div>
+                </button>
+            </div>
+
+            <h4 style="margin: 1.25rem 0 0.75rem 0; color: #1e293b; font-size: 0.95rem;"><i class="fas fa-tags" style="color: #3b82f6; margin-right: 0.4rem;"></i>分類（カテゴリ予測）</h4>
+            <div class="demo-options-grid">
+                <button class="demo-option-btn" data-demo="classification_demo.csv">
+                    <div class="icon"><i class="fas fa-user-slash"></i></div>
+                    <div class="info">
+                        <strong>顧客離反データ</strong>
+                        <span>200件・顧客の解約を予測（2クラス）</span>
+                    </div>
+                </button>
+                <button class="demo-option-btn" data-demo="iris.csv">
+                    <div class="icon"><i class="fas fa-seedling"></i></div>
+                    <div class="info">
+                        <strong>Iris（アヤメ）データ</strong>
+                        <span>150件・花の計測値から品種を分類（3クラス）</span>
+                    </div>
+                </button>
+                <button class="demo-option-btn" data-demo="wine.csv">
+                    <div class="icon"><i class="fas fa-wine-glass-alt"></i></div>
+                    <div class="info">
+                        <strong>ワイン品種データ</strong>
+                        <span>178件・化学分析13変数から品種を判別（3クラス）</span>
+                    </div>
+                </button>
+                <button class="demo-option-btn" data-demo="penguins.csv">
+                    <div class="icon"><i class="fas fa-kiwi-bird"></i></div>
+                    <div class="info">
+                        <strong>ペンギンデータ</strong>
+                        <span>144件・体の計測値からペンギンの種類を分類（3クラス）</span>
                     </div>
                 </button>
             </div>

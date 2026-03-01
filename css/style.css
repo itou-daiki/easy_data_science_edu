@@ -417,9 +417,10 @@ table tr:hover { background: var(--background); }
     background-color: rgba(0,0,0,0.5); backdrop-filter: blur(4px); animation: fadeIn 0.3s ease;
 }
 .modal-content.demo-modal-content {
-    background-color: #fefefe; margin: 5% auto; padding: 2rem;
+    background-color: #fefefe; margin: 3% auto; padding: 2rem;
     border: 1px solid #888; width: 95%; max-width: 800px; border-radius: 16px;
     box-shadow: 0 10px 25px rgba(0,0,0,0.2); position: relative; animation: slideUp 0.3s ease;
+    max-height: 90vh; overflow-y: auto;
 }
 @keyframes slideUp {
     from { opacity: 0; transform: translateY(20px); }
@@ -438,7 +439,7 @@ table tr:hover { background: var(--background); }
 .demo-options-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
 .demo-option-btn {
     display: flex; align-items: center; text-align: left; background: white;
-    border: 1px solid var(--border-color); border-radius: 12px; padding: 1.25rem;
+    border: 1px solid var(--border-color); border-radius: 12px; padding: 1rem;
     cursor: pointer; transition: all 0.2s ease; width: 100%; color: var(--text-primary);
 }
 .demo-option-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-color: var(--primary-color); background: #f8fafc; }
