@@ -2,7 +2,7 @@
 // 回帰モデル比較 (AutoML) Module
 // PyCaret-style: setup → compare_models (CV) → tune_model → predict_model
 // ==========================================
-import { createSelect, createStepIndicator, formatNumber, renderPlot, renderActualVsPredicted, renderResidualPlot, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton, makeExportFileName } from '../utils.js';
+import { createSelect, createStepIndicator, formatNumber, renderPlot, renderActualVsPredicted, renderResidualPlot, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton, makeExportFileName, renderDataPreview, renderSummaryStatistics } from '../utils.js';
 import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
 import { prepareFeatures } from '../ml/preprocessing.js';
 import { trainTestSplit, crossValidate, gridSearch, permutationImportance, learningCurve } from '../ml/model_selection.js';
@@ -34,6 +34,8 @@ const PARAM_GRIDS = {
     'GBM': { nEstimators: [50, 100], learningRate: [0.05, 0.1], maxDepth: [3, 5] },
 };
 
+const STEPS = ['Setup', 'Preprocess', 'Compare', 'Create', 'Tune', 'Interpret', 'Blend', 'Stack', 'Finalize', 'Predict'];
+
 // Module-level state for sharing data between steps
 let _state = {};
 
@@ -47,7 +49,12 @@ export function render(container, data, characteristics) {
             PyCaret のように複数の回帰モデルを一括学習・比較し、最適なモデルを見つけます。
         </p>
 
-        ${createStepIndicator(['Setup', 'Compare', 'Create', 'Tune', 'Interpret', 'Blend', 'Stack', 'Finalize', 'Predict'], 0)}
+        ${createStepIndicator(STEPS, 0)}
+
+        <div id="data-overview-section" style="margin-bottom: 1.5rem;">
+            <div id="reg-dataframe-container"></div>
+            <div id="reg-summary-stats-container"></div>
+        </div>
 
         <div id="setup-section" class="model-config">
             <h3><i class="fas fa-cog"></i> Step 1: セットアップ</h3>
@@ -100,6 +107,9 @@ export function render(container, data, characteristics) {
         </div>
     `;
 
+    renderDataPreview('reg-dataframe-container', data, 'データプレビュー');
+    renderSummaryStatistics('reg-summary-stats-container', data, characteristics, '要約統計量');
+
     const targetSelect = container.querySelector('#target-select');
     const btnCompare = container.querySelector('#btn-compare');
     const featureSelection = container.querySelector('#feature-selection');
@@ -149,7 +159,8 @@ async function runComparison(container, data, characteristics) {
     container.querySelector('#setup-section').style.display = 'none';
     container.querySelector('#compare-section').style.display = 'block';
 
-    container.querySelector('.step-indicator').innerHTML = createStepIndicator(['Setup', 'Compare', 'Create', 'Tune', 'Interpret', 'Blend', 'Stack', 'Finalize', 'Predict'], 1).replace(/<\/?div[^>]*class="step-indicator"[^>]*>/g, '');
+    // Show Preprocess step first
+    container.querySelector('.step-indicator').innerHTML = createStepIndicator(STEPS, 1).replace(/<\/?div[^>]*class="step-indicator"[^>]*>/g, '');
 
     const progressArea = container.querySelector('#progress-area');
     progressArea.innerHTML = `<div style="text-align: center; padding: 2rem;">
@@ -161,7 +172,7 @@ async function runComparison(container, data, characteristics) {
     await new Promise(r => setTimeout(r, 100));
 
     try {
-        const { X, y, featureNames, scaler } = prepareFeatures(data, targetCol, {
+        const { X, y, featureNames, encoders, scaler } = prepareFeatures(data, targetCol, {
             selectedFeatures,
             task: 'regression'
         });
@@ -170,6 +181,56 @@ async function runComparison(container, data, characteristics) {
 
         // Save state for tune/predict
         _state = { XTrain, XTest, yTrain, yTest, featureNames, scaler, cvFolds, targetCol, fileName: characteristics.fileName || 'data' };
+
+        // Compute preprocessing info
+        const missingCount = selectedFeatures.reduce((sum, col) => {
+            return sum + data.filter(row => row[col] == null || row[col] === '').length;
+        }, 0);
+        const categoricalCount = encoders ? encoders.size : 0;
+        const scalingApplied = scaler !== null;
+
+        // Show preprocessing summary
+        progressArea.innerHTML = `
+            <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 1.25rem; margin-bottom: 1.5rem;">
+                <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; color: #166534;">
+                    <i class="fas fa-magic" style="margin-right: 0.5rem;"></i>Step 2: 前処理 (自動完了)
+                </h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1.5rem;">
+                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                        <i class="fas fa-check-circle"></i>
+                        <span>目的変数: <strong>${targetCol}</strong></span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                        <i class="fas fa-check-circle"></i>
+                        <span>特徴量: <strong>${featureNames.length}個</strong></span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                        <i class="fas fa-check-circle"></i>
+                        <span>欠損値処理: ${missingCount > 0 ? missingCount + '個を平均値で補完' : '欠損値なし'}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                        <i class="fas fa-check-circle"></i>
+                        <span>カテゴリ変数: ${categoricalCount > 0 ? categoricalCount + '列をLabel Encoding' : 'エンコード不要'}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                        <i class="fas fa-check-circle"></i>
+                        <span>スケーリング: ${scalingApplied ? 'StandardScaler (平均0, 分散1)' : 'なし'}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                        <i class="fas fa-check-circle"></i>
+                        <span>データ分割: 訓練${XTrain.length}件 / テスト${XTest.length}件</span>
+                    </div>
+                </div>
+            </div>
+            <div style="text-align: center; padding: 2rem;">
+                <i class="fas fa-spinner fa-spin fa-2x" style="color: #d97706;"></i>
+                <p style="margin-top: 1rem; font-weight: 600;">モデルを学習・比較しています...</p>
+                <div id="model-progress" style="margin-top: 1rem;"></div>
+            </div>
+        `;
+
+        // Update step to Compare
+        container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 2);
 
         const results = [];
         const modelProgress = container.querySelector('#model-progress');
@@ -319,7 +380,7 @@ function showModelDetail(container, result, yTest, featureNames) {
     const evalSection = container.querySelector('#evaluate-section');
     evalSection.style.display = 'block';
 
-    container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Create', 'Tune', 'Interpret', 'Blend', 'Stack', 'Finalize', 'Predict'], 2);
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 3);
 
     const evalContent = container.querySelector('#evaluation-content');
     const hasTuneGrid = PARAM_GRIDS[result.badge] != null;
@@ -534,6 +595,7 @@ async function runTuneModel(container, result, featureNames) {
         <span style="margin-left: 0.5rem;">GridSearch CV 実行中...</span>
     </div>`;
 
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 4);
     await new Promise(r => setTimeout(r, 100));
 
     try {
@@ -682,9 +744,7 @@ async function runCreateModel(container, featureNames) {
     btnCreate.disabled = true;
 
     // Update step indicator
-    container.querySelector('.step-indicator').outerHTML = createStepIndicator(
-        ['Setup', 'Compare', 'Create', 'Tune', 'Interpret', 'Blend', 'Stack', 'Finalize', 'Predict'], 2
-    );
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 3);
 
     createResults.innerHTML = `<div style="text-align: center; padding: 1rem;">
         <i class="fas fa-spinner fa-spin" style="color: #059669;"></i>
@@ -806,7 +866,7 @@ async function runInterpretModel(container, result, featureNames) {
     btnInterpret.disabled = true;
 
     // Update step indicator
-    container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Create', 'Tune', 'Interpret', 'Blend', 'Stack', 'Finalize', 'Predict'], 4);
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 5);
 
     interpretResults.innerHTML = `<div style="text-align: center; padding: 1rem;">
         <i class="fas fa-spinner fa-spin" style="color: #16a34a;"></i>
@@ -1029,7 +1089,7 @@ async function runBlendModels(container, featureNames) {
     btnBlend.disabled = true;
 
     // Update step indicator
-    container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Create', 'Tune', 'Interpret', 'Blend', 'Stack', 'Finalize', 'Predict'], 5);
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 6);
 
     blendResults.innerHTML = `<div style="text-align: center; padding: 1rem;">
         <i class="fas fa-spinner fa-spin" style="color: #7c3aed;"></i>
@@ -1139,9 +1199,7 @@ async function runStackModels(container, featureNames) {
     btnStack.disabled = true;
 
     // Update step indicator
-    container.querySelector('.step-indicator').outerHTML = createStepIndicator(
-        ['Setup', 'Compare', 'Create', 'Tune', 'Interpret', 'Blend', 'Stack', 'Finalize', 'Predict'], 6
-    );
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 7);
 
     stackResults.innerHTML = `<div style="text-align: center; padding: 1rem;">
         <i class="fas fa-spinner fa-spin" style="color: #a855f7;"></i>
@@ -1296,7 +1354,7 @@ async function runFinalizeModel(container, result, featureNames) {
     btnFinalize.disabled = true;
 
     // Update step indicator
-    container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Create', 'Tune', 'Interpret', 'Blend', 'Stack', 'Finalize', 'Predict'], 7);
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 8);
 
     finalizeResults.innerHTML = `<div style="text-align: center; padding: 1rem;">
         <i class="fas fa-spinner fa-spin" style="color: #dc2626;"></i>
@@ -1395,7 +1453,7 @@ function runPredictModel(container, result, featureNames) {
         const prediction = activeModel.predict(processedInput);
 
         // Update step indicator to Predict
-        container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Create', 'Tune', 'Interpret', 'Blend', 'Stack', 'Finalize', 'Predict'], 8);
+        container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 9);
 
         predictResult.innerHTML = `
             <div style="background: white; padding: 1.5rem; border-radius: 8px; text-align: center;">
