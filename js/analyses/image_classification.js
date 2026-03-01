@@ -447,10 +447,9 @@ export function render(container, _data, _characteristics) {
         renderStepIndicator(container, 3);
         container.querySelector('#ic-step-evaluate').style.display = 'none';
         container.querySelector('#ic-step-predict').style.display = 'block';
+        // Setup prediction listeners with current state (after training)
+        setupPredictionListeners(container, () => state);
     });
-
-    // --- Prediction: Drop Zone ---
-    setupPredictionListeners(container, state, (newState) => { state = newState; });
 }
 
 // ==========================================
@@ -916,7 +915,7 @@ function renderConfusionMatrixSection(container, history) {
 // Prediction
 // ==========================================
 
-function setupPredictionListeners(container, state, setState) {
+function setupPredictionListeners(container, getState) {
     const dropZone = container.querySelector('#ic-predict-drop-zone');
     const fileInput = container.querySelector('#ic-predict-file-input');
 
@@ -940,7 +939,7 @@ function setupPredictionListeners(container, state, setState) {
             showError(container, '対応する画像形式（JPG, PNG, WEBP）のみ使用できます。');
             return;
         }
-        await predictImage(container, state, file);
+        await predictImage(container, getState(), file);
     });
 
     dropZone.addEventListener('click', () => fileInput.click());
@@ -952,7 +951,7 @@ function setupPredictionListeners(container, state, setState) {
             showError(container, '対応する画像形式（JPG, PNG, WEBP）のみ使用できます。');
             return;
         }
-        await predictImage(container, state, file);
+        await predictImage(container, getState(), file);
         fileInput.value = '';
     });
 }

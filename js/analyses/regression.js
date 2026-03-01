@@ -420,7 +420,10 @@ function showModelDetail(container, result, yTest, featureNames) {
                 <div>
                     <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">アルゴリズム:</label>
                     <select id="create-model-select" class="form-select">
-                        ${MODELS.map((m, i) => `<option value="${i}">${m.name} (${m.badge})</option>`).join('')}
+                        ${MODELS.map((m, i) => {
+                            const isTop = _state.results && _state.results[0] && _state.results[0].badge === m.badge;
+                            return `<option value="${i}" ${isTop ? 'selected' : ''}>${m.name} (${m.badge})${isTop ? ' ★1位' : ''}</option>`;
+                        }).join('')}
                     </select>
                 </div>
                 <div id="create-params-area">
