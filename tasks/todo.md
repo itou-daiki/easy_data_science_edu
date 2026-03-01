@@ -1,20 +1,19 @@
-# Iteration 5: finalize_model + blend_models — COMPLETE
+# Iteration 6: SHAP + create_model + stack_models — COMPLETE
 
 ## 目標
-PyCaret トレース率 ~85% → ~90%
-- finalize_model (全データで再学習 → 本番モデル)
-- blend_models (上位モデルの平均アンサンブル)
+PyCaret トレース率 100%
 
 ## タスク
 
-- [x] 1. regression.js に finalize_model セクション追加
-- [x] 2. regression.js に blend_models 機能追加
-- [x] 3. classification.js に finalize_model セクション追加
-- [x] 4. classification.js に blend_models 機能追加
+- [x] 1. js/ml/shap.js 新規作成 (linearSHAP + kernelSHAP)
+- [x] 2. js/utils.js にSHAP可視化関数追加
+- [x] 3. regression.js にSHAP + create_model + stack_models追加
+- [x] 4. classification.js にSHAP + create_model + stack_models追加
 - [x] 5. ブラウザ検証 (Playwright)
 - [x] 6. progress.md 更新
 
 ## 成功基準
-- finalize_model で全データ再学習後、predict_modelで予測できること ✅
-- blend_models で上位N個のモデルをアンサンブルして予測できること ✅
-- コンソールエラー: 0 (favicon除く) ✅
+- SHAP 3プロット (Summary/Beeswarm/Waterfall) が描画されること ✅
+- create_model で個別モデル学習・評価ができること ✅
+- stack_models でメタラーナースタッキングができること ✅
+- コンソールエラー: 0 ✅

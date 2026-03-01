@@ -2,7 +2,8 @@
 // 分類モデル比較 (AutoML) Module
 // PyCaret-style: setup → compare_models (CV) → tune_model → predict_model
 // ==========================================
-import { createSelect, createStepIndicator, formatNumber, renderPlot, renderConfusionMatrix, renderROCCurve, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve } from '../utils.js';
+import { createSelect, createStepIndicator, formatNumber, renderPlot, renderConfusionMatrix, renderROCCurve, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall } from '../utils.js';
+import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
 import { prepareFeatures } from '../ml/preprocessing.js';
 import { trainTestSplit, crossValidate, gridSearch, permutationImportance, learningCurve } from '../ml/model_selection.js';
 import { accuracy, precisionScore, recallScore, f1Score, confusionMatrix, logLoss, rocAucScore } from '../ml/metrics.js';
@@ -33,6 +34,8 @@ const PARAM_GRIDS = {
     'GBM': { nEstimators: [50, 100], learningRate: [0.05, 0.1], maxDepth: [3, 5] },
 };
 
+const STEPS = ['Setup', 'Compare', 'Create', 'Tune', 'Interpret', 'Blend', 'Stack', 'Finalize', 'Predict'];
+
 // Module-level state for sharing data between steps
 let _state = {};
 
@@ -55,7 +58,7 @@ export function render(container, data, characteristics) {
             PyCaret のように複数の分類モデルを一括学習・比較し、最適なモデルを見つけます。
         </p>
 
-        ${createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Blend', 'Finalize', 'Predict'], 0)}
+        ${createStepIndicator(STEPS, 0)}
 
         <div id="setup-section" class="model-config">
             <h3><i class="fas fa-cog"></i> Step 1: セットアップ</h3>
@@ -171,7 +174,7 @@ async function runComparison(container, data, characteristics) {
     container.querySelector('#setup-section').style.display = 'none';
     container.querySelector('#compare-section').style.display = 'block';
 
-    container.querySelector('.step-indicator').innerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Blend', 'Finalize', 'Predict'], 1).replace(/<\/?div[^>]*class="step-indicator"[^>]*>/g, '');
+    container.querySelector('.step-indicator').innerHTML = createStepIndicator(STEPS, 1).replace(/<\/?div[^>]*class="step-indicator"[^>]*>/g, '');
 
     const progressArea = container.querySelector('#progress-area');
     progressArea.innerHTML = `<div style="text-align: center; padding: 2rem;">
@@ -338,7 +341,7 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
     const evalSection = container.querySelector('#evaluate-section');
     evalSection.style.display = 'block';
 
-    container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Blend', 'Finalize', 'Predict'], 2);
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 1);
 
     const evalContent = container.querySelector('#evaluation-content');
     const hasTuneGrid = PARAM_GRIDS[result.badge] != null;
@@ -370,6 +373,30 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
             </div>
         </div>
 
+        <!-- Create Model Section -->
+        <div style="margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, #fef9c3, #fde68a); border-radius: 12px;">
+            <h4><i class="fas fa-plus-circle" style="color: #b45309;"></i> create_model - 個別モデル作成</h4>
+            <p style="color: #92400e; margin: 0.5rem 0;">
+                特定のモデルをパラメータ指定で作成・学習します。Compare の結果を踏まえ、詳細にモデルを構築できます。
+            </p>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+                <div>
+                    <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">モデルを選択:</label>
+                    <select id="create-model-select" class="form-select">
+                        ${MODELS.map((m, i) => `<option value="${i}">${m.name} (${m.badge})</option>`).join('')}
+                    </select>
+                </div>
+                <div id="create-model-params">
+                    <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">パラメータ:</label>
+                    <div id="create-param-fields"></div>
+                </div>
+            </div>
+            <button id="btn-create-model" class="btn-analysis" style="background: #b45309; margin-top: 0.5rem;">
+                <i class="fas fa-hammer"></i> create_model を実行
+            </button>
+            <div id="create-model-results" style="margin-top: 1rem;"></div>
+        </div>
+
         <!-- Tune Model Section -->
         ${hasTuneGrid ? `
         <div style="margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, #cffafe, #a5f3fc); border-radius: 12px;">
@@ -389,7 +416,7 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
         <div style="margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, #f0fdf4, #dcfce7); border-radius: 12px;">
             <h4><i class="fas fa-search-plus" style="color: #16a34a;"></i> interpret_model - モデル解釈</h4>
             <p style="color: #166534; margin: 0.5rem 0;">
-                Permutation Feature Importance、Partial Dependence Plot (PDP)、Learning Curve でモデルを深く理解します。
+                Permutation Feature Importance、PDP、Learning Curve、SHAP でモデルを深く理解します。
             </p>
             <button id="btn-interpret" class="btn-analysis" style="background: #16a34a; margin-top: 1rem;">
                 <i class="fas fa-microscope"></i> interpret_model を実行
@@ -415,6 +442,26 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
                 <i class="fas fa-blender"></i> blend_models を実行
             </button>
             <div id="blend-results" style="margin-top: 1rem;"></div>
+        </div>
+
+        <!-- Stack Models Section -->
+        <div style="margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, #fdf2f8, #fce7f3); border-radius: 12px;">
+            <h4><i class="fas fa-layer-group" style="color: #be185d;"></i> stack_models - スタッキングアンサンブル</h4>
+            <p style="color: #9d174d; margin: 0.5rem 0;">
+                上位モデルの予測をメタ学習器（ロジスティック回帰）の入力として使い、より高精度な予測を目指します。
+            </p>
+            <div style="margin: 1rem 0;">
+                <label style="font-weight: 600; margin-right: 0.5rem;">スタックするモデル数:</label>
+                <select id="stack-top-n" class="form-select" style="display: inline-block; width: auto;">
+                    <option value="3" selected>上位3モデル</option>
+                    <option value="5">上位5モデル</option>
+                    <option value="7">全モデル (7)</option>
+                </select>
+            </div>
+            <button id="btn-stack" class="btn-analysis" style="background: #be185d; margin-top: 0.5rem;">
+                <i class="fas fa-object-group"></i> stack_models を実行
+            </button>
+            <div id="stack-results" style="margin-top: 1rem;"></div>
         </div>
 
         <!-- Finalize Model Section -->
@@ -463,6 +510,18 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
         renderFeatureImportance('feature-importance-plot', featureNames, result.featureImportance);
     }
 
+    // Create Model: populate param fields on model select change
+    const createModelSelect = container.querySelector('#create-model-select');
+    updateCreateModelParams(container, parseInt(createModelSelect.value));
+    createModelSelect.addEventListener('change', () => {
+        updateCreateModelParams(container, parseInt(createModelSelect.value));
+    });
+
+    // Create Model button handler
+    container.querySelector('#btn-create-model').addEventListener('click', () => {
+        runCreateModel(container, featureNames, classes, classLabels);
+    });
+
     // Tune button handler
     if (hasTuneGrid) {
         container.querySelector('#btn-tune').addEventListener('click', () => {
@@ -480,6 +539,11 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
         runBlendModels(container, featureNames, classes, classLabels);
     });
 
+    // Stack button handler
+    container.querySelector('#btn-stack').addEventListener('click', () => {
+        runStackModels(container, featureNames, classes, classLabels);
+    });
+
     // Finalize button handler
     container.querySelector('#btn-finalize').addEventListener('click', () => {
         runFinalizeModel(container, result, featureNames);
@@ -493,10 +557,118 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
     evalSection.scrollIntoView({ behavior: 'smooth' });
 }
 
+function updateCreateModelParams(container, modelIndex) {
+    const modelDef = MODELS[modelIndex];
+    const paramFields = container.querySelector('#create-param-fields');
+    const paramEntries = Object.entries(modelDef.params);
+
+    if (paramEntries.length === 0) {
+        paramFields.innerHTML = '<p style="color: var(--text-secondary); font-size: 0.85rem;">このモデルにはデフォルトパラメータがありません。</p>';
+        return;
+    }
+
+    paramFields.innerHTML = paramEntries.map(([key, defaultVal]) => `
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+            <label style="font-size: 0.85rem; min-width: 100px;">${key}:</label>
+            <input type="number" id="create-param-${key}" class="form-select"
+                   value="${defaultVal}" step="any"
+                   style="width: 120px; font-size: 0.85rem;">
+        </div>
+    `).join('');
+}
+
+async function runCreateModel(container, featureNames, classes, classLabels) {
+    const createResults = container.querySelector('#create-model-results');
+    const btnCreate = container.querySelector('#btn-create-model');
+    btnCreate.disabled = true;
+
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 2);
+
+    createResults.innerHTML = `<div style="text-align: center; padding: 1rem;">
+        <i class="fas fa-spinner fa-spin" style="color: #b45309;"></i>
+        <span style="margin-left: 0.5rem;">モデルを作成中...</span>
+    </div>`;
+
+    await new Promise(r => setTimeout(r, 100));
+
+    try {
+        const modelIndex = parseInt(container.querySelector('#create-model-select').value);
+        const modelDef = MODELS[modelIndex];
+
+        // Collect custom params from input fields
+        const customParams = {};
+        for (const [key] of Object.entries(modelDef.params)) {
+            const input = container.querySelector(`#create-param-${key}`);
+            if (input && input.value !== '') {
+                customParams[key] = parseFloat(input.value);
+            }
+        }
+
+        const mergedParams = { ...modelDef.params, ...customParams };
+        const model = new modelDef.cls(mergedParams);
+        model.fit(_state.XTrain, _state.yTrain);
+
+        const yPred = model.predict(_state.XTest);
+        const yProba = model.predictProba ? model.predictProba(_state.XTest) : null;
+
+        const cvScores = crossValidate(model, _state.XTrain, _state.yTrain, { cv: _state.cvFolds, scoring: 'f1' });
+        const cvMean = cvScores.reduce((a, b) => a + b, 0) / cvScores.length;
+
+        const acc = accuracy(_state.yTest, yPred);
+        const prec = precisionScore(_state.yTest, yPred);
+        const rec = recallScore(_state.yTest, yPred);
+        const f1 = f1Score(_state.yTest, yPred);
+        const cm = confusionMatrix(_state.yTest, yPred).matrix;
+
+        // Store created model in state
+        _state.createdModel = model;
+        _state.createdModelResult = {
+            name: modelDef.name,
+            badge: modelDef.badge,
+            cls: modelDef.cls,
+            model,
+            acc, prec, rec, f1, cm,
+            cvMean,
+            yPred, yProba,
+            params: mergedParams
+        };
+
+        createResults.innerHTML = `
+            <div style="background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1rem;">
+                <h4><i class="fas fa-check-circle" style="color: #10b981;"></i> ${modelDef.name} を作成しました</h4>
+                <p style="color: var(--text-secondary); margin: 0.5rem 0;">
+                    パラメータ: ${JSON.stringify(mergedParams)}
+                </p>
+                <div class="metrics-grid" style="margin: 1rem 0;">
+                    ${createMetricCard('CV F1 (mean)', cvMean, `${_state.cvFolds}-Fold CV`)}
+                    ${createMetricCard('Accuracy', acc, '正解率')}
+                    ${createMetricCard('F1 Score', f1, 'F1スコア')}
+                    ${createMetricCard('Precision', prec, '適合率')}
+                    ${createMetricCard('Recall', rec, '再現率')}
+                </div>
+                <div id="create-model-cm-plot" style="margin-top: 1.5rem;"></div>
+                <p style="color: #166534; font-weight: 600; margin-top: 1rem;">
+                    <i class="fas fa-info-circle"></i> 作成したモデルは predict_model で使用できます（finalize / stack / blend が未実行の場合）。
+                </p>
+            </div>
+        `;
+
+        renderConfusionMatrix('create-model-cm-plot', cm, classLabels);
+
+    } catch (error) {
+        createResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> モデル作成エラー: ${error.message}</p>`;
+        console.error('Create model error:', error);
+    }
+
+    btnCreate.disabled = false;
+}
+
 async function runTuneModel(container, result, featureNames, classes, classLabels) {
     const tuneResults = container.querySelector('#tune-results');
     const btnTune = container.querySelector('#btn-tune');
     btnTune.disabled = true;
+
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 3);
 
     tuneResults.innerHTML = `<div style="text-align: center; padding: 1rem;">
         <i class="fas fa-spinner fa-spin" style="color: #0891b2;"></i>
@@ -648,7 +820,7 @@ async function runInterpretModel(container, result, featureNames) {
     btnInterpret.disabled = true;
 
     // Update step indicator
-    container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Blend', 'Finalize', 'Predict'], 3);
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 4);
 
     interpretResults.innerHTML = `<div style="text-align: center; padding: 1rem;">
         <i class="fas fa-spinner fa-spin" style="color: #16a34a;"></i>
@@ -679,7 +851,14 @@ async function runInterpretModel(container, result, featureNames) {
         html += '<p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">訓練データ量と性能の関係を可視化。過学習・未学習の診断に使います。</p>';
         html += '<div id="learning-curve-plot"></div>';
 
-        // 4. Interpretation
+        // 4. SHAP Analysis
+        html += '<h4 style="margin-top: 2rem;"><i class="fas fa-puzzle-piece" style="color: #16a34a;"></i> SHAP (SHapley Additive exPlanations)</h4>';
+        html += '<p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">ゲーム理論に基づく各特徴量の貢献度を計算し、モデルの予測を説明します。</p>';
+        html += '<div id="shap-summary-plot"></div>';
+        html += '<div id="shap-beeswarm-plot" style="margin-top: 1.5rem;"></div>';
+        html += '<div id="shap-waterfall-plot" style="margin-top: 1.5rem;"></div>';
+
+        // 5. Interpretation
         html += '<div id="interpret-analysis" style="margin-top: 2rem;"></div>';
 
         html += '</div>';
@@ -713,6 +892,9 @@ async function runInterpretModel(container, result, featureNames) {
             lcResult.testScoresMean, lcResult.testScoresStd,
             'F1 Score'
         );
+
+        // Compute SHAP values
+        computeAndRenderSHAP(result, featureNames);
 
         // Generate interpretation analysis
         const analysisHtml = generateInterpretAnalysis(featureNames, importancesMean, lcResult);
@@ -764,6 +946,69 @@ function computeAndRenderPDP(model, featureNames, featureIndex) {
     }
 
     renderPDP('pdp-plot', featureNames[featureIndex], gridValues, pdpValues, '#16a34a');
+}
+
+function computeAndRenderSHAP(result, featureNames) {
+    const model = result.model;
+    const XTest = _state.XTest;
+    const XTrain = _state.XTrain;
+
+    // Compute feature means from training data
+    const nFeatures = featureNames.length;
+    const featureMeans = Array(nFeatures).fill(0);
+    for (const row of XTrain) {
+        for (let f = 0; f < nFeatures; f++) {
+            featureMeans[f] += row[f];
+        }
+    }
+    for (let f = 0; f < nFeatures; f++) {
+        featureMeans[f] /= XTrain.length;
+    }
+
+    let shapResult;
+
+    // Use linearSHAP for LogisticRegression (has coefficients), kernelSHAP otherwise
+    const isLogistic = model instanceof LogisticRegression;
+
+    if (isLogistic && model.weights && model.weights.length > 0) {
+        // For binary LogisticRegression, use linearSHAP with the weight vector
+        const w = model.weights[0];
+        const coefficients = w.slice(0, nFeatures);
+        const intercept = w[nFeatures] || 0;
+        shapResult = linearSHAP(coefficients, intercept, XTest, featureMeans);
+    } else if (model.predictProba) {
+        // Use probability of positive class as prediction function
+        const predictFn = (X) => {
+            const proba = model.predictProba(X);
+            return proba.map(p => p[1] || 0);
+        };
+        // Use a subset of background samples for efficiency
+        const bgSample = XTrain.length > 50 ? XTrain.slice(0, 50) : XTrain;
+        shapResult = kernelSHAP(predictFn, XTest, bgSample);
+    } else {
+        // Map class labels to 0/1 for SHAP
+        const classes = _state.classes;
+        const predictFn = (X) => {
+            const preds = model.predict(X);
+            return preds.map(p => p === classes[classes.length - 1] ? 1 : 0);
+        };
+        const bgSample = XTrain.length > 50 ? XTrain.slice(0, 50) : XTrain;
+        shapResult = kernelSHAP(predictFn, XTest, bgSample);
+    }
+
+    const { shapValues, baseValue } = shapResult;
+    const { meanAbsSHAP, meanSHAP } = shapSummary(shapValues);
+
+    // 1. SHAP Summary Bar
+    renderSHAPSummary('shap-summary-plot', featureNames, meanAbsSHAP, meanSHAP);
+
+    // 2. SHAP Beeswarm
+    renderSHAPBeeswarm('shap-beeswarm-plot', featureNames, shapValues, XTest);
+
+    // 3. SHAP Waterfall for first test sample
+    const firstSHAP = shapValues[0];
+    const firstPrediction = baseValue + firstSHAP.reduce((a, b) => a + b, 0);
+    renderSHAPWaterfall('shap-waterfall-plot', featureNames, firstSHAP, baseValue, firstPrediction);
 }
 
 function generateInterpretAnalysis(featureNames, importancesMean, lcResult) {
@@ -825,7 +1070,7 @@ async function runBlendModels(container, featureNames, classes, classLabels) {
     const btnBlend = container.querySelector('#btn-blend');
     btnBlend.disabled = true;
 
-    container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Blend', 'Finalize', 'Predict'], 4);
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 5);
 
     blendResults.innerHTML = `<div style="text-align: center; padding: 1rem;">
         <i class="fas fa-spinner fa-spin" style="color: #7c3aed;"></i>
@@ -977,12 +1222,193 @@ async function runBlendModels(container, featureNames, classes, classLabels) {
     btnBlend.disabled = false;
 }
 
+async function runStackModels(container, featureNames, classes, classLabels) {
+    const stackResults = container.querySelector('#stack-results');
+    const btnStack = container.querySelector('#btn-stack');
+    btnStack.disabled = true;
+
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 6);
+
+    stackResults.innerHTML = `<div style="text-align: center; padding: 1rem;">
+        <i class="fas fa-spinner fa-spin" style="color: #be185d;"></i>
+        <span style="margin-left: 0.5rem;">モデルをスタッキング中...</span>
+    </div>`;
+
+    await new Promise(r => setTimeout(r, 100));
+
+    try {
+        const topN = parseInt(container.querySelector('#stack-top-n').value);
+        const validResults = _state.results.filter(r => r.model);
+        const topModels = validResults.slice(0, topN);
+
+        // Build stacked features for training data
+        const stackedTrainFeatures = _state.XTrain.map((_, sampleIdx) => {
+            const features = [];
+            for (const mr of topModels) {
+                const sampleInput = [_state.XTrain[sampleIdx]];
+                if (mr.model.predictProba) {
+                    const proba = mr.model.predictProba(sampleInput);
+                    features.push(...proba[0]);
+                } else {
+                    // One-hot encode predictions
+                    const pred = mr.model.predict(sampleInput)[0];
+                    const oneHot = classes.map(c => c === pred ? 1 : 0);
+                    features.push(...oneHot);
+                }
+            }
+            return features;
+        });
+
+        // Build stacked features for test data
+        const stackedTestFeatures = _state.XTest.map((_, sampleIdx) => {
+            const features = [];
+            for (const mr of topModels) {
+                const sampleInput = [_state.XTest[sampleIdx]];
+                if (mr.model.predictProba) {
+                    const proba = mr.model.predictProba(sampleInput);
+                    features.push(...proba[0]);
+                } else {
+                    const pred = mr.model.predict(sampleInput)[0];
+                    const oneHot = classes.map(c => c === pred ? 1 : 0);
+                    features.push(...oneHot);
+                }
+            }
+            return features;
+        });
+
+        // Train meta-learner (LogisticRegression) on stacked features
+        const metaLearner = new LogisticRegression({ maxIter: 1000 });
+        metaLearner.fit(stackedTrainFeatures, _state.yTrain);
+
+        // Evaluate on test data
+        const stackedPred = metaLearner.predict(stackedTestFeatures);
+        const stackedF1 = f1Score(_state.yTest, stackedPred);
+        const stackedAcc = accuracy(_state.yTest, stackedPred);
+        const stackedPrec = precisionScore(_state.yTest, stackedPred);
+        const stackedRec = recallScore(_state.yTest, stackedPred);
+        const bestSingleF1 = topModels[0].f1;
+
+        // Create stacked model proxy for predict
+        const stackedModel = {
+            baseModels: topModels.map(m => m.model),
+            metaLearner,
+            _classes: classes,
+            predict(X) {
+                const stackedFeatures = X.map(row => {
+                    const features = [];
+                    for (const bm of this.baseModels) {
+                        if (bm.predictProba) {
+                            const proba = bm.predictProba([row]);
+                            features.push(...proba[0]);
+                        } else {
+                            const pred = bm.predict([row])[0];
+                            const oneHot = this._classes.map(c => c === pred ? 1 : 0);
+                            features.push(...oneHot);
+                        }
+                    }
+                    return features;
+                });
+                return this.metaLearner.predict(stackedFeatures);
+            },
+            predictProba(X) {
+                const stackedFeatures = X.map(row => {
+                    const features = [];
+                    for (const bm of this.baseModels) {
+                        if (bm.predictProba) {
+                            const proba = bm.predictProba([row]);
+                            features.push(...proba[0]);
+                        } else {
+                            const pred = bm.predict([row])[0];
+                            const oneHot = this._classes.map(c => c === pred ? 1 : 0);
+                            features.push(...oneHot);
+                        }
+                    }
+                    return features;
+                });
+                return this.metaLearner.predictProba(stackedFeatures);
+            },
+            getParams() { return { type: 'stack', nModels: this.baseModels.length, meta: 'LogisticRegression' }; }
+        };
+
+        _state.stackedModel = stackedModel;
+
+        stackResults.innerHTML = `
+            <div style="background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1rem;">
+                <h4>スタッキング結果 (上位 ${topN} モデル + LogisticRegression メタ学習器)</h4>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                    ベースモデル: ${topModels.map(m => m.badge).join(', ')} / メタ学習器: LogisticRegression
+                </p>
+                <div class="table-container">
+                    <table class="table">
+                        <thead>
+                            <tr><th>指標</th><th>ベストモデル (${topModels[0].badge})</th><th>スタッキングモデル</th><th>変化</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Test F1</td>
+                                <td>${formatNumber(bestSingleF1)}</td>
+                                <td>${formatNumber(stackedF1)}</td>
+                                <td style="color: ${stackedF1 > bestSingleF1 ? '#10b981' : '#ef4444'};">
+                                    ${stackedF1 > bestSingleF1 ? '+' : ''}${formatNumber(stackedF1 - bestSingleF1)}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>Accuracy</td>
+                                <td>${formatNumber(topModels[0].acc)}</td>
+                                <td>${formatNumber(stackedAcc)}</td>
+                                <td style="color: ${stackedAcc > topModels[0].acc ? '#10b981' : '#ef4444'};">
+                                    ${stackedAcc > topModels[0].acc ? '+' : ''}${formatNumber(stackedAcc - topModels[0].acc)}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>Precision</td>
+                                <td>${formatNumber(topModels[0].prec)}</td>
+                                <td>${formatNumber(stackedPrec)}</td>
+                                <td style="color: ${stackedPrec > topModels[0].prec ? '#10b981' : '#ef4444'};">
+                                    ${stackedPrec > topModels[0].prec ? '+' : ''}${formatNumber(stackedPrec - topModels[0].prec)}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>Recall</td>
+                                <td>${formatNumber(topModels[0].rec)}</td>
+                                <td>${formatNumber(stackedRec)}</td>
+                                <td style="color: ${stackedRec > topModels[0].rec ? '#10b981' : '#ef4444'};">
+                                    ${stackedRec > topModels[0].rec ? '+' : ''}${formatNumber(stackedRec - topModels[0].rec)}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                ${stackedF1 > bestSingleF1
+                    ? `<p style="color: #10b981; font-weight: 600; margin-top: 1rem;">
+                        <i class="fas fa-check-circle"></i> スタッキングモデルがベストモデルを上回りました！predict_model でスタッキングモデルを使用できます。
+                      </p>`
+                    : `<p style="color: #f59e0b; font-weight: 600; margin-top: 1rem;">
+                        <i class="fas fa-info-circle"></i> スタッキングモデルはベストモデルを上回りませんでした。単体モデルやブレンドモデルの方が適している可能性があります。
+                      </p>`
+                }
+            </div>
+        `;
+
+        // Add confusion matrix for stacked model
+        const stackedCM = confusionMatrix(_state.yTest, stackedPred);
+        stackResults.querySelector('div').insertAdjacentHTML('beforeend', '<div id="stack-cm-plot" style="margin-top: 1.5rem;"></div>');
+        renderConfusionMatrix('stack-cm-plot', stackedCM.matrix, classLabels);
+
+    } catch (error) {
+        stackResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> スタッキングエラー: ${error.message}</p>`;
+        console.error('Stack error:', error);
+    }
+
+    btnStack.disabled = false;
+}
+
 async function runFinalizeModel(container, result, featureNames) {
     const finalizeResults = container.querySelector('#finalize-results');
     const btnFinalize = container.querySelector('#btn-finalize');
     btnFinalize.disabled = true;
 
-    container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Blend', 'Finalize', 'Predict'], 5);
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 7);
 
     finalizeResults.innerHTML = `<div style="text-align: center; padding: 1rem;">
         <i class="fas fa-spinner fa-spin" style="color: #dc2626;"></i>
@@ -1067,16 +1493,19 @@ function runPredictModel(container, result, featureNames) {
             processedInput = _state.scaler.transform(processedInput);
         }
 
-        // Use finalized model > blended model > original model
-        const activeModel = _state.finalizedModel || _state.blendedModel || result.model;
+        // Use finalized > stacked > blended > created > best model
+        const activeModel = _state.finalizedModel || _state.stackedModel || _state.blendedModel
+                         || (_state.createdModel ? _state.createdModel : result.model);
         const modelLabel = _state.finalizedModel ? `${result.name} (確定済み)`
+                         : _state.stackedModel ? 'スタッキングモデル'
                          : _state.blendedModel ? 'ブレンドモデル'
+                         : _state.createdModel ? `${_state.createdModelResult.name} (作成済み)`
                          : result.name;
         const prediction = activeModel.predict(processedInput);
         const proba = activeModel.predictProba ? activeModel.predictProba(processedInput) : null;
 
         // Update step indicator
-        container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Blend', 'Finalize', 'Predict'], 6);
+        container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 8);
 
         // Convert numeric prediction back to label
         const predictedLabel = _state.labelEncoder

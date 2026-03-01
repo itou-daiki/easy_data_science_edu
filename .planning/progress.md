@@ -131,3 +131,48 @@
   - finalize_model(): ✅ (全データ再学習)
   - 未実装: stack_models, SHAP, create_model個別
 - **判定**: 採用
+
+## Iteration 6 (2026-03-02)
+- **目標**: PyCaret トレース率 100% — SHAP + create_model + stack_models
+- **変更**:
+  - js/ml/shap.js: 新規作成 (~210行)
+    - linearSHAP(): 線形モデル用の厳密SHAP値計算
+    - kernelSHAP(): モデル非依存のKernel SHAP (全2^n coalition列挙 + WLS)
+    - shapSummary(): 特徴量ごとの平均|SHAP|集計
+  - js/utils.js: SHAP可視化関数3つ追加 (+130行)
+    - renderSHAPSummary(): mean |SHAP| バープロット
+    - renderSHAPBeeswarm(): 個別SHAP値の蜂群プロット (特徴量値で着色)
+    - renderSHAPWaterfall(): 単一予測の説明ウォーターフォール
+  - regression.js: 全面拡張 (~960行 → ~1430行)
+    - SHAP: interpret_modelにSHAP Summary + Beeswarm + Waterfall追加
+    - create_model: モデルセレクタ + パラメータ入力 + 個別学習・評価
+    - stack_models: 上位Nモデル予測をメタ特徴量化 → LinearRegression メタラーナー
+    - ステップインジケータ: 7段→9段 (Setup/Compare/Create/Tune/Interpret/Blend/Stack/Finalize/Predict)
+    - predict_model: finalized > stacked > blended > created > best の優先順位
+  - classification.js: 同等の拡張 (~1100行 → ~1560行)
+    - SHAP: LogisticRegression用linearSHAP + その他kernelSHAP (predictProbaベース)
+    - create_model: 分類用モデル個別学習 + 混同行列
+    - stack_models: predictProbaメタ特徴量 → LogisticRegression メタラーナー
+- **成功基準**: SHAP/create_model/stack_model が全てブラウザで動作すること
+- **結果**: 全検証パス
+  - 回帰 SHAP: Summary Bar + Beeswarm + Waterfall 全3プロット正常描画
+  - 回帰 create_model: 線形回帰 個別学習・評価 正常
+  - 回帰 stack_models: 上位3モデル → LinearRegression メタラーナー 正常
+  - 分類 SHAP: 全3プロット正常 (KNN用kernelSHAP)
+  - 分類 create_model: 個別学習 + 混同行列 正常
+  - 分類 stack_models: LogisticRegression メタラーナー + スタッキング予測 正常
+  - 分類 predict_model: 「スタッキングモデル」で予測成功
+  - コンソールエラー: 0
+- **PyCaret トレース率**: ~90% → **100%**
+  - setup(): ✅
+  - compare_models(): ✅
+  - create_model(): ✅ (個別モデル作成 + カスタムパラメータ)
+  - tune_model(): ✅
+  - evaluate_model(): ✅
+  - predict_model(): ✅
+  - interpret_model(): ✅ (Permutation Importance + PDP + Learning Curve + SHAP)
+  - plot_model(): ✅
+  - blend_models(): ✅
+  - stack_models(): ✅ (メタラーナースタッキング)
+  - finalize_model(): ✅
+- **判定**: 採用

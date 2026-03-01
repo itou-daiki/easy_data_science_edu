@@ -558,6 +558,150 @@ export function renderLearningCurve(containerId, trainSizes, trainScoresMean, tr
     renderPlot(containerId, data, layout);
 }
 
+/**
+ * Renders SHAP summary bar plot (mean |SHAP| per feature).
+ * @param {string} containerId
+ * @param {string[]} featureNames
+ * @param {number[]} meanAbsSHAP
+ * @param {number[]} meanSHAP - signed mean SHAP (for color direction)
+ */
+export function renderSHAPSummary(containerId, featureNames, meanAbsSHAP, meanSHAP) {
+    const indices = meanAbsSHAP.map((v, i) => i).sort((a, b) => meanAbsSHAP[a] - meanAbsSHAP[b]);
+    const sortedNames = indices.map(i => featureNames[i]);
+    const sortedAbs = indices.map(i => meanAbsSHAP[i]);
+    const sortedSigned = indices.map(i => meanSHAP[i]);
+
+    const data = [{
+        type: 'bar',
+        x: sortedAbs,
+        y: sortedNames,
+        orientation: 'h',
+        marker: { color: sortedSigned.map(v => v > 0 ? '#ef4444' : '#3b82f6') },
+        hovertemplate: '%{y}: %{x:.4f}<extra></extra>'
+    }];
+    const layout = {
+        title: 'SHAP Feature Importance (mean |SHAP|)',
+        xaxis: { title: 'mean |SHAP value|' },
+        margin: { l: 150 },
+        height: Math.max(300, sortedNames.length * 30)
+    };
+    renderPlot(containerId, data, layout);
+}
+
+/**
+ * Renders SHAP beeswarm plot (individual SHAP values colored by feature value).
+ * @param {string} containerId
+ * @param {string[]} featureNames
+ * @param {number[][]} shapValues - (nSamples x nFeatures)
+ * @param {number[][]} featureValues - (nSamples x nFeatures)
+ */
+export function renderSHAPBeeswarm(containerId, featureNames, shapValues, featureValues) {
+    const nFeatures = featureNames.length;
+    // Sort features by mean |SHAP|
+    const meanAbs = Array(nFeatures).fill(0);
+    for (const row of shapValues) {
+        for (let f = 0; f < nFeatures; f++) meanAbs[f] += Math.abs(row[f]);
+    }
+    meanAbs.forEach((v, i, a) => a[i] = v / shapValues.length);
+    const sortedIdx = meanAbs.map((v, i) => i).sort((a, b) => meanAbs[a] - meanAbs[b]);
+
+    const traces = [];
+    for (let rank = 0; rank < sortedIdx.length; rank++) {
+        const f = sortedIdx[rank];
+        const svs = shapValues.map(row => row[f]);
+        const fvs = featureValues.map(row => row[f]);
+
+        // Normalize feature values to [0,1] for coloring
+        const fMin = Math.min(...fvs);
+        const fMax = Math.max(...fvs);
+        const fRange = fMax - fMin || 1;
+        const normalized = fvs.map(v => (v - fMin) / fRange);
+
+        // Add jitter for y-axis
+        const yJitter = svs.map(() => rank + (Math.random() - 0.5) * 0.3);
+
+        traces.push({
+            x: svs,
+            y: yJitter,
+            mode: 'markers',
+            type: 'scatter',
+            name: featureNames[f],
+            marker: {
+                size: 5,
+                color: normalized,
+                colorscale: [[0, '#3b82f6'], [1, '#ef4444']],
+                opacity: 0.7,
+                showscale: rank === sortedIdx.length - 1,
+                colorbar: rank === sortedIdx.length - 1 ? {
+                    title: '特徴量値',
+                    titleside: 'right',
+                    tickvals: [0, 1],
+                    ticktext: ['低', '高']
+                } : undefined
+            },
+            showlegend: false,
+            hovertemplate: `${featureNames[f]}<br>SHAP: %{x:.4f}<br>値: %{text}<extra></extra>`,
+            text: fvs.map(v => v.toFixed(2))
+        });
+    }
+
+    const layout = {
+        title: 'SHAP Beeswarm Plot',
+        xaxis: { title: 'SHAP value', zeroline: true, zerolinecolor: '#94a3b8' },
+        yaxis: {
+            tickvals: sortedIdx.map((_, i) => i),
+            ticktext: sortedIdx.map(i => featureNames[i]),
+            automargin: true
+        },
+        margin: { l: 150 },
+        height: Math.max(350, nFeatures * 40),
+        hovermode: 'closest'
+    };
+    renderPlot(containerId, traces, layout);
+}
+
+/**
+ * Renders SHAP waterfall plot for a single prediction.
+ * @param {string} containerId
+ * @param {string[]} featureNames
+ * @param {number[]} shapValues - SHAP values for one instance
+ * @param {number} baseValue - Expected model output
+ * @param {number} prediction - Actual prediction for this instance
+ */
+export function renderSHAPWaterfall(containerId, featureNames, shapValues, baseValue, prediction) {
+    // Sort by absolute SHAP value (largest first)
+    const indices = shapValues.map((v, i) => i).sort((a, b) => Math.abs(shapValues[b]) - Math.abs(shapValues[a]));
+
+    const labels = ['E[f(x)]', ...indices.map(i => featureNames[i]), 'f(x)'];
+    const measures = ['absolute', ...indices.map(() => 'relative'), 'total'];
+    const values = [baseValue, ...indices.map(i => shapValues[i]), prediction];
+    const colors = ['#94a3b8', ...indices.map(i => shapValues[i] > 0 ? '#ef4444' : '#3b82f6'), '#10b981'];
+
+    const data = [{
+        type: 'waterfall',
+        orientation: 'v',
+        x: labels,
+        y: values,
+        measure: measures,
+        connector: { line: { color: '#cbd5e1', width: 1 } },
+        increasing: { marker: { color: '#ef4444' } },
+        decreasing: { marker: { color: '#3b82f6' } },
+        totals: { marker: { color: '#10b981' } },
+        texttemplate: '%{y:.2f}',
+        textposition: 'outside',
+        hovertemplate: '%{x}<br>%{y:.4f}<extra></extra>'
+    }];
+
+    const layout = {
+        title: 'SHAP Waterfall (個別予測の説明)',
+        yaxis: { title: '予測値' },
+        height: 400,
+        margin: { t: 50, b: 80 },
+        showlegend: false
+    };
+    renderPlot(containerId, data, layout);
+}
+
 export function renderROCCurve(containerId, yTrue, yProba, auc) {
     const thresholds = Array.from({ length: 101 }, (_, i) => i / 100);
     const points = thresholds.map(t => {
