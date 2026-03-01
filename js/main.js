@@ -154,6 +154,8 @@ function processData(fileName, jsonData) {
     currentData = jsonData;
 
     const characteristics = analyzeDataCharacteristics(jsonData);
+    // Store filename (without extension) for CSV export naming
+    characteristics.fileName = fileName.replace(/\.[^.]+$/, '');
     window.dataCharacteristics = characteristics;
     dataCharacteristics = characteristics;
 

@@ -771,16 +771,32 @@ export function toCSV(headers, rows) {
  * @param {string} filename - Download filename
  */
 export function downloadCSV(csvContent, filename) {
+    // Ensure .csv extension
+    const safeFilename = filename.endsWith('.csv') ? filename : filename + '.csv';
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = filename;
+    link.download = safeFilename;
     link.style.display = 'none';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+}
+
+/**
+ * Generate a download filename with dataset name and date.
+ * Format: {datasetName}_{suffix}_{YYYYMMDD}.csv
+ * @param {string} datasetName - Dataset name (without extension)
+ * @param {string} suffix - Type suffix (e.g., '比較結果', '予測結果')
+ * @returns {string} Formatted filename
+ */
+export function makeExportFileName(datasetName, suffix) {
+    const now = new Date();
+    const date = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    const name = datasetName || 'data';
+    return `${name}_${suffix}_${date}.csv`;
 }
 
 /**

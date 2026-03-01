@@ -2,7 +2,7 @@
 // 回帰モデル比較 (AutoML) Module
 // PyCaret-style: setup → compare_models (CV) → tune_model → predict_model
 // ==========================================
-import { createSelect, createStepIndicator, formatNumber, renderPlot, renderActualVsPredicted, renderResidualPlot, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton } from '../utils.js';
+import { createSelect, createStepIndicator, formatNumber, renderPlot, renderActualVsPredicted, renderResidualPlot, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton, makeExportFileName } from '../utils.js';
 import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
 import { prepareFeatures } from '../ml/preprocessing.js';
 import { trainTestSplit, crossValidate, gridSearch, permutationImportance, learningCurve } from '../ml/model_selection.js';
@@ -169,7 +169,7 @@ async function runComparison(container, data, characteristics) {
         const { XTrain, XTest, yTrain, yTest } = trainTestSplit(X, y, { testSize, randomState: 42 });
 
         // Save state for tune/predict
-        _state = { XTrain, XTest, yTrain, yTest, featureNames, scaler, cvFolds, targetCol };
+        _state = { XTrain, XTest, yTrain, yTest, featureNames, scaler, cvFolds, targetCol, fileName: characteristics.fileName || 'data' };
 
         const results = [];
         const modelProgress = container.querySelector('#model-progress');
@@ -304,7 +304,7 @@ function renderComparisonResults(container, results, yTest, featureNames) {
                 r.model ? formatNumber(r.mae) : '-',
                 r.model ? formatNumber(r.rmse) : '-'
             ]);
-            downloadCSV(toCSV(headers, rows), 'regression_comparison.csv');
+            downloadCSV(toCSV(headers, rows), makeExportFileName(_state.fileName, '回帰_比較結果'));
         });
     }
 
@@ -1416,7 +1416,7 @@ function runPredictModel(container, result, featureNames) {
                 const headers = ['特徴量名', '入力値'];
                 const rows = featureNames.map((f, i) => [f, inputValues[i]]);
                 rows.push(['予測結果', formatNumber(prediction[0], 4)]);
-                downloadCSV(toCSV(headers, rows), 'regression_prediction.csv');
+                downloadCSV(toCSV(headers, rows), makeExportFileName(_state.fileName, '回帰_予測結果'));
             });
         }
     } catch (error) {

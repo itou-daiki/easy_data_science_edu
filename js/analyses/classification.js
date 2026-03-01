@@ -2,7 +2,7 @@
 // 分類モデル比較 (AutoML) Module
 // PyCaret-style: setup → compare_models (CV) → tune_model → predict_model
 // ==========================================
-import { createSelect, createStepIndicator, formatNumber, renderPlot, renderConfusionMatrix, renderROCCurve, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton } from '../utils.js';
+import { createSelect, createStepIndicator, formatNumber, renderPlot, renderConfusionMatrix, renderROCCurve, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton, makeExportFileName } from '../utils.js';
 import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
 import { prepareFeatures } from '../ml/preprocessing.js';
 import { trainTestSplit, crossValidate, gridSearch, permutationImportance, learningCurve } from '../ml/model_selection.js';
@@ -197,7 +197,7 @@ async function runComparison(container, data, characteristics) {
         const { XTrain, XTest, yTrain, yTest } = trainTestSplit(X, y, { testSize, randomState: 42 });
 
         // Save state for tune/predict
-        _state = { XTrain, XTest, yTrain, yTest, featureNames, scaler, labelEncoder, classes, classLabels, cvFolds, targetCol };
+        _state = { XTrain, XTest, yTrain, yTest, featureNames, scaler, labelEncoder, classes, classLabels, cvFolds, targetCol, fileName: characteristics.fileName || 'data' };
 
         const results = [];
         const modelProgress = container.querySelector('#model-progress');
@@ -353,7 +353,7 @@ function renderComparisonResults(container, results, yTest, featureNames, classe
                 return row;
             });
             const csv = toCSV(headers, rows);
-            downloadCSV(csv, 'classification_comparison.csv');
+            downloadCSV(csv, makeExportFileName(_state.fileName, '分類_比較結果'));
         });
     }
 
@@ -1586,7 +1586,7 @@ function runPredictModel(container, result, featureNames) {
                     });
                 }
                 const csv = toCSV(headers, rows);
-                downloadCSV(csv, 'classification_prediction.csv');
+                downloadCSV(csv, makeExportFileName(_state.fileName, '分類_予測結果'));
             });
         }
     } catch (error) {
