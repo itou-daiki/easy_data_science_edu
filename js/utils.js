@@ -741,3 +741,59 @@ export function renderROCCurve(containerId, yTrue, yProba, auc) {
     };
     renderPlot(containerId, data, layout);
 }
+
+// ===========================================================================
+// CSV Download Utilities
+// ===========================================================================
+
+/**
+ * Convert headers and rows to CSV string with BOM for Excel.
+ * @param {string[]} headers - Column header names
+ * @param {Array<Array<string|number>>} rows - 2D array of cell values
+ * @returns {string}
+ */
+export function toCSV(headers, rows) {
+    const escape = (val) => {
+        const s = val == null ? '' : String(val);
+        return s.includes(',') || s.includes('"') || s.includes('\n')
+            ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [headers.map(escape).join(',')];
+    for (const row of rows) {
+        lines.push(row.map(escape).join(','));
+    }
+    return '\uFEFF' + lines.join('\n');
+}
+
+/**
+ * Trigger a CSV file download in the browser.
+ * @param {string} csvContent - CSV-formatted string
+ * @param {string} filename - Download filename
+ */
+export function downloadCSV(csvContent, filename) {
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
+/**
+ * Create a styled download button HTML string.
+ * @param {string} id - Button element id
+ * @param {string} label - Button label text
+ * @returns {string} HTML string
+ */
+export function createDownloadButton(id, label) {
+    return `<button id="${id}" style="
+        background: #059669; color: white; border: none; padding: 0.5rem 1.25rem;
+        border-radius: 8px; font-size: 0.85rem; font-weight: 500; cursor: pointer;
+        display: inline-flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem;
+        transition: all 0.3s ease;
+    "><i class="fas fa-download"></i> ${label}</button>`;
+}

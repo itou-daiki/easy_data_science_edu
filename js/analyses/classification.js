@@ -2,7 +2,7 @@
 // 分類モデル比較 (AutoML) Module
 // PyCaret-style: setup → compare_models (CV) → tune_model → predict_model
 // ==========================================
-import { createSelect, createStepIndicator, formatNumber, renderPlot, renderConfusionMatrix, renderROCCurve, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall } from '../utils.js';
+import { createSelect, createStepIndicator, formatNumber, renderPlot, renderConfusionMatrix, renderROCCurve, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton } from '../utils.js';
 import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
 import { prepareFeatures } from '../ml/preprocessing.js';
 import { trainTestSplit, crossValidate, gridSearch, permutationImportance, learningCurve } from '../ml/model_selection.js';
@@ -319,6 +319,7 @@ function renderComparisonResults(container, results, yTest, featureNames, classe
                 </tbody>
             </table>
         </div>
+        ${createDownloadButton('dl-comparison-csv', '比較結果をCSVダウンロード')}
     `;
 
     comparisonDiv.innerHTML = html;
@@ -330,6 +331,31 @@ function renderComparisonResults(container, results, yTest, featureNames, classe
             showModelDetail(container, results[idx], yTest, featureNames, classes, classLabels);
         });
     });
+
+    const dlCompBtn = comparisonDiv.querySelector('#dl-comparison-csv');
+    if (dlCompBtn) {
+        dlCompBtn.addEventListener('click', () => {
+            const headers = ['順位', 'モデル', 'Badge', 'CV F1 (mean)', 'CV F1 (std)', 'Test F1', 'Accuracy', 'Precision', 'Recall'];
+            if (hasAuc) headers.push('AUC');
+            const rows = results.map((r, i) => {
+                const row = [
+                    r.model ? i + 1 : '-',
+                    r.name,
+                    r.badge,
+                    r.model ? formatNumber(r.cvMean) : '-',
+                    r.model ? formatNumber(r.cvStd) : '-',
+                    r.model ? formatNumber(r.f1) : '-',
+                    r.model ? formatNumber(r.acc) : '-',
+                    r.model ? formatNumber(r.prec) : '-',
+                    r.model ? formatNumber(r.rec) : '-'
+                ];
+                if (hasAuc) row.push(r.auc != null ? formatNumber(r.auc) : '-');
+                return row;
+            });
+            const csv = toCSV(headers, rows);
+            downloadCSV(csv, 'classification_comparison.csv');
+        });
+    }
 
     const bestModel = results.find(r => r.model);
     if (bestModel) {
@@ -1542,7 +1568,27 @@ function runPredictModel(container, result, featureNames) {
                 </p>
                 ${probaHtml}
             </div>
+            ${createDownloadButton('dl-predict-csv', '予測結果をCSVダウンロード')}
         `;
+
+        const dlPredBtn = predictResult.querySelector('#dl-predict-csv');
+        if (dlPredBtn) {
+            dlPredBtn.addEventListener('click', () => {
+                const headers = ['項目', '値'];
+                const rows = [
+                    ...featureNames.map((f, i) => [f, inputValues[i]]),
+                    ['予測クラス', predictedLabel]
+                ];
+                if (proba && proba[0]) {
+                    _state.classLabels.forEach((label, i) => {
+                        const p = proba[0][i] || 0;
+                        rows.push([`確率: ${label}`, `${(p * 100).toFixed(1)}%`]);
+                    });
+                }
+                const csv = toCSV(headers, rows);
+                downloadCSV(csv, 'classification_prediction.csv');
+            });
+        }
     } catch (error) {
         predictResult.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 予測エラー: ${error.message}</p>`;
         console.error('Predict error:', error);

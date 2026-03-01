@@ -2,7 +2,7 @@
 // 回帰モデル比較 (AutoML) Module
 // PyCaret-style: setup → compare_models (CV) → tune_model → predict_model
 // ==========================================
-import { createSelect, createStepIndicator, formatNumber, renderPlot, renderActualVsPredicted, renderResidualPlot, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall } from '../utils.js';
+import { createSelect, createStepIndicator, formatNumber, renderPlot, renderActualVsPredicted, renderResidualPlot, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton } from '../utils.js';
 import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
 import { prepareFeatures } from '../ml/preprocessing.js';
 import { trainTestSplit, crossValidate, gridSearch, permutationImportance, learningCurve } from '../ml/model_selection.js';
@@ -277,6 +277,7 @@ function renderComparisonResults(container, results, yTest, featureNames) {
                 </tbody>
             </table>
         </div>
+        ${createDownloadButton('dl-comparison-csv', '比較結果をCSVダウンロード')}
     `;
 
     comparisonDiv.innerHTML = html;
@@ -288,6 +289,24 @@ function renderComparisonResults(container, results, yTest, featureNames) {
             showModelDetail(container, results[idx], yTest, featureNames);
         });
     });
+
+    const dlCompBtn = comparisonDiv.querySelector('#dl-comparison-csv');
+    if (dlCompBtn) {
+        dlCompBtn.addEventListener('click', () => {
+            const headers = ['順位', 'モデル', 'Badge', 'CV R² (mean)', 'CV R² (std)', 'Test R²', 'MAE', 'RMSE'];
+            const rows = _state.results.map((r, i) => [
+                r.model ? i + 1 : '-',
+                r.name,
+                r.badge,
+                r.model ? formatNumber(r.cvMean) : '-',
+                r.model ? formatNumber(r.cvStd) : '-',
+                r.model ? formatNumber(r.r2) : '-',
+                r.model ? formatNumber(r.mae) : '-',
+                r.model ? formatNumber(r.rmse) : '-'
+            ]);
+            downloadCSV(toCSV(headers, rows), 'regression_comparison.csv');
+        });
+    }
 
     // Auto-show best model detail
     const bestModel = results.find(r => r.model);
@@ -1387,8 +1406,19 @@ function runPredictModel(container, result, featureNames) {
                 <p style="font-size: 0.85rem; color: var(--text-secondary);">
                     目的変数: ${_state.targetCol}
                 </p>
+                ${createDownloadButton('dl-predict-csv', '予測結果をCSVダウンロード')}
             </div>
         `;
+
+        const dlPredBtn = predictResult.querySelector('#dl-predict-csv');
+        if (dlPredBtn) {
+            dlPredBtn.addEventListener('click', () => {
+                const headers = ['特徴量名', '入力値'];
+                const rows = featureNames.map((f, i) => [f, inputValues[i]]);
+                rows.push(['予測結果', formatNumber(prediction[0], 4)]);
+                downloadCSV(toCSV(headers, rows), 'regression_prediction.csv');
+            });
+        }
     } catch (error) {
         predictResult.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 予測エラー: ${error.message}</p>`;
         console.error('Predict error:', error);
