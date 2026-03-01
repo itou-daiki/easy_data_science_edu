@@ -199,3 +199,25 @@
   - BOM付きUTF-8でExcel互換
   - コンソールエラー: 0
 - **判定**: 採用
+
+## Iteration 8 (2026-03-02)
+- **目標**: UX改善3点 — CSVファイル名修正 + 入門データセット追加 + 前処理自動化
+- **変更**:
+  - js/utils.js: makeExportFileName() 追加、downloadCSV に .csv 拡張子保証
+  - js/main.js: characteristics.fileName にデータセット名保存
+  - regression.js / classification.js: 動的ファイル名 (データセット名_サフィックス_YYYYMMDD.csv)
+  - datasets/: iris.csv, wine.csv, penguins.csv, tips.csv 新規追加
+  - index.html: デモモーダルを回帰/分類カテゴリに整理 (6データセット対応)
+  - css/style.css: モーダルスクロール対応
+  - js/utils.js: createMetricCard で整数値は toLocaleString() 表示
+  - regression.js / classification.js: Preprocess ステップ追加 (10段パイプライン)
+    - 前処理サマリー (欠損値/カテゴリ/スケーリング/分割) 表示
+    - 各分析ページ上部にデータプレビュー + 要約統計量表示
+- **成功基準**: CSVが正しいファイル名でダウンロード可能、全データセットで動作
+- **結果**:
+  - CSVファイル名: regression_demo_回帰_比較結果_20260302.csv 形式で正常ダウンロード
+  - iris/wine/penguins/tips: 全てHTTPサーバーから配信確認
+  - 学習サンプル数: 整数表示 (150.0000 → 150)
+  - Preprocess ステップ: 前処理自動化サマリー表示
+  - パイプライン: 10段 (Setup→Preprocess→Compare→Create→Tune→Interpret→Blend→Stack→Finalize→Predict)
+- **判定**: 採用
