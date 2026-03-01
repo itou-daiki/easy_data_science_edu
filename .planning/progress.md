@@ -97,3 +97,37 @@
   - plot_model(): ✅ (Learning Curve)
   - 未実装: blend/stack_models, SHAP, create_model個別, finalize_model
 - **判定**: 採用
+
+## Iteration 5 (2026-03-02)
+- **目標**: PyCaret トレース率向上 (~85% → ~90%) - finalize_model + blend_models
+- **変更**:
+  - regression.js: 全面拡張 (781行 → ~960行)
+    - blend_models: 上位Nモデル(3/5/全)の予測値平均アンサンブル
+    - finalize_model: 全データ(訓練+テスト)再学習 + 全データCV評価
+    - predict_model: finalized > blended > best の優先順位で予測
+    - ステップインジケータ: 5段→7段 (Setup/Compare/Tune/Interpret/Blend/Finalize/Predict)
+  - classification.js: 同等の拡張 (892行 → ~1100行)
+    - blend_models: 多数決投票 + predictProba確率平均
+    - finalize_model: 全データ再学習 + F1ベースCV
+    - predict_model: 確定済みモデル優先 + クラス別確率表示
+- **成功基準**: blend/finalize/predict が全てブラウザで動作すること
+- **結果**: 全検証パス
+  - 回帰 blend_models: Linear+Lasso+Ridge平均 → Test R² 0.9823 (+0.0002改善)
+  - 回帰 finalize_model: 全150サンプル再学習、CV R²=0.9840
+  - 回帰 predict_model: 「線形回帰 (確定済み)」80㎡/築10年→3816万円
+  - 分類 blend_models: KNN+NB+GBM 多数決投票 正常
+  - 分類 finalize_model: K近傍法 全200サンプル再学習
+  - 分類 predict_model: 「K近傍法 (確定済み)」クラス0 (60%/40%) 正常
+  - コンソールエラー: 0
+- **PyCaret トレース率**: ~85% → ~90%
+  - setup(): ✅
+  - compare_models(): ✅
+  - tune_model(): ✅
+  - evaluate_model(): ✅
+  - predict_model(): ✅
+  - interpret_model(): ✅
+  - plot_model(): ✅
+  - blend_models(): ✅ (予測値平均/多数決投票)
+  - finalize_model(): ✅ (全データ再学習)
+  - 未実装: stack_models, SHAP, create_model個別
+- **判定**: 採用

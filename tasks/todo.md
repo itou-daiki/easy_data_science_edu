@@ -1,28 +1,20 @@
-# Iteration 4: interpret_model + Learning Curve
+# Iteration 5: finalize_model + blend_models — COMPLETE
 
 ## 目標
-PyCaret トレース率 ~70% → ~85%
-- interpret_model (Permutation Importance, PDP)
-- plot_model (Learning Curve)
-- ステップ: Setup → Compare → Tune → Interpret → Predict (5段)
+PyCaret トレース率 ~85% → ~90%
+- finalize_model (全データで再学習 → 本番モデル)
+- blend_models (上位モデルの平均アンサンブル)
 
 ## タスク
 
-- [x] 1. model_selection.js に permutationImportance() 追加
-- [x] 2. model_selection.js に learningCurve() 追加
-- [x] 3. utils.js に renderPermutationImportance() 追加
-- [x] 4. utils.js に renderPDP() 追加
-- [x] 5. utils.js に renderLearningCurve() 追加
-- [x] 6. regression.js に interpret_model セクション追加
-- [x] 7. classification.js に interpret_model セクション追加
-- [x] 8. ブラウザ検証 (Playwright)
-- [x] 9. progress.md 更新
+- [x] 1. regression.js に finalize_model セクション追加
+- [x] 2. regression.js に blend_models 機能追加
+- [x] 3. classification.js に finalize_model セクション追加
+- [x] 4. classification.js に blend_models 機能追加
+- [x] 5. ブラウザ検証 (Playwright)
+- [x] 6. progress.md 更新
 
 ## 成功基準
-- [x] Permutation Importance がプロットされること
-- [x] PDP が各特徴量で描画されること
-- [x] Learning Curve が描画されること
-- [x] コンソールエラー: 0 (favicon除く)
-
-## 結果
-全検証パス。判定: 採用。
+- finalize_model で全データ再学習後、predict_modelで予測できること ✅
+- blend_models で上位N個のモデルをアンサンブルして予測できること ✅
+- コンソールエラー: 0 (favicon除く) ✅

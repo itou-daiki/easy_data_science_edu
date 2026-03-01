@@ -55,7 +55,7 @@ export function render(container, data, characteristics) {
             PyCaret のように複数の分類モデルを一括学習・比較し、最適なモデルを見つけます。
         </p>
 
-        ${createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Predict'], 0)}
+        ${createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Blend', 'Finalize', 'Predict'], 0)}
 
         <div id="setup-section" class="model-config">
             <h3><i class="fas fa-cog"></i> Step 1: セットアップ</h3>
@@ -171,7 +171,7 @@ async function runComparison(container, data, characteristics) {
     container.querySelector('#setup-section').style.display = 'none';
     container.querySelector('#compare-section').style.display = 'block';
 
-    container.querySelector('.step-indicator').innerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Predict'], 1).replace(/<\/?div[^>]*class="step-indicator"[^>]*>/g, '');
+    container.querySelector('.step-indicator').innerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Blend', 'Finalize', 'Predict'], 1).replace(/<\/?div[^>]*class="step-indicator"[^>]*>/g, '');
 
     const progressArea = container.querySelector('#progress-area');
     progressArea.innerHTML = `<div style="text-align: center; padding: 2rem;">
@@ -338,7 +338,7 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
     const evalSection = container.querySelector('#evaluate-section');
     evalSection.style.display = 'block';
 
-    container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Predict'], 2);
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Blend', 'Finalize', 'Predict'], 2);
 
     const evalContent = container.querySelector('#evaluation-content');
     const hasTuneGrid = PARAM_GRIDS[result.badge] != null;
@@ -397,6 +397,38 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
             <div id="interpret-results" style="margin-top: 1rem;"></div>
         </div>
 
+        <!-- Blend Models Section -->
+        <div style="margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, #faf5ff, #f3e8ff); border-radius: 12px;">
+            <h4><i class="fas fa-layer-group" style="color: #7c3aed;"></i> blend_models - モデルアンサンブル</h4>
+            <p style="color: #5b21b6; margin: 0.5rem 0;">
+                上位モデルの予測確率を平均して、より安定した分類を実現します。
+            </p>
+            <div style="margin: 1rem 0;">
+                <label style="font-weight: 600; margin-right: 0.5rem;">ブレンドするモデル数:</label>
+                <select id="blend-top-n" class="form-select" style="display: inline-block; width: auto;">
+                    <option value="3" selected>上位3モデル</option>
+                    <option value="5">上位5モデル</option>
+                    <option value="7">全モデル (7)</option>
+                </select>
+            </div>
+            <button id="btn-blend" class="btn-analysis" style="background: #7c3aed; margin-top: 0.5rem;">
+                <i class="fas fa-blender"></i> blend_models を実行
+            </button>
+            <div id="blend-results" style="margin-top: 1rem;"></div>
+        </div>
+
+        <!-- Finalize Model Section -->
+        <div style="margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, #fef2f2, #fecaca); border-radius: 12px;">
+            <h4><i class="fas fa-check-double" style="color: #dc2626;"></i> finalize_model - モデル確定</h4>
+            <p style="color: #991b1b; margin: 0.5rem 0;">
+                全データ（訓練+テスト）で再学習し、本番用モデルとして確定します。
+            </p>
+            <button id="btn-finalize" class="btn-analysis" style="background: #dc2626; margin-top: 1rem;">
+                <i class="fas fa-flag-checkered"></i> finalize_model を実行
+            </button>
+            <div id="finalize-results" style="margin-top: 1rem;"></div>
+        </div>
+
         <!-- Predict Section -->
         <div style="margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, #dbeafe, #bfdbfe); border-radius: 12px;">
             <h4><i class="fas fa-calculator" style="color: #2563eb;"></i> predict_model - 新しいデータで予測</h4>
@@ -441,6 +473,16 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
     // Interpret button handler
     container.querySelector('#btn-interpret').addEventListener('click', () => {
         runInterpretModel(container, result, featureNames);
+    });
+
+    // Blend button handler
+    container.querySelector('#btn-blend').addEventListener('click', () => {
+        runBlendModels(container, featureNames, classes, classLabels);
+    });
+
+    // Finalize button handler
+    container.querySelector('#btn-finalize').addEventListener('click', () => {
+        runFinalizeModel(container, result, featureNames);
     });
 
     // Predict button handler
@@ -606,7 +648,7 @@ async function runInterpretModel(container, result, featureNames) {
     btnInterpret.disabled = true;
 
     // Update step indicator
-    container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Predict'], 3);
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Blend', 'Finalize', 'Predict'], 3);
 
     interpretResults.innerHTML = `<div style="text-align: center; padding: 1rem;">
         <i class="fas fa-spinner fa-spin" style="color: #16a34a;"></i>
@@ -778,6 +820,221 @@ function generateInterpretAnalysis(featureNames, importancesMean, lcResult) {
     return html;
 }
 
+async function runBlendModels(container, featureNames, classes, classLabels) {
+    const blendResults = container.querySelector('#blend-results');
+    const btnBlend = container.querySelector('#btn-blend');
+    btnBlend.disabled = true;
+
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Blend', 'Finalize', 'Predict'], 4);
+
+    blendResults.innerHTML = `<div style="text-align: center; padding: 1rem;">
+        <i class="fas fa-spinner fa-spin" style="color: #7c3aed;"></i>
+        <span style="margin-left: 0.5rem;">モデルをブレンド中...</span>
+    </div>`;
+
+    await new Promise(r => setTimeout(r, 100));
+
+    try {
+        const topN = parseInt(container.querySelector('#blend-top-n').value);
+        const validResults = _state.results.filter(r => r.model);
+        const topModels = validResults.slice(0, topN);
+
+        // For classification, use majority voting
+        const blendedPred = _state.yTest.map((_, i) => {
+            const votes = {};
+            topModels.forEach(m => {
+                const pred = m.yPred[i];
+                votes[pred] = (votes[pred] || 0) + 1;
+            });
+            // Return class with most votes
+            let maxVotes = 0;
+            let bestClass = topModels[0].yPred[i];
+            for (const [cls, count] of Object.entries(votes)) {
+                if (count > maxVotes) {
+                    maxVotes = count;
+                    bestClass = Number(cls);
+                }
+            }
+            return bestClass;
+        });
+
+        const blendedF1 = f1Score(_state.yTest, blendedPred);
+        const blendedAcc = accuracy(_state.yTest, blendedPred);
+        const blendedPrec = precisionScore(_state.yTest, blendedPred);
+        const blendedRec = recallScore(_state.yTest, blendedPred);
+        const bestSingleF1 = topModels[0].f1;
+
+        // Create a blended model proxy for predict
+        const blendedModel = {
+            models: topModels.map(m => m.model),
+            predict(X) {
+                return X.map((_, i) => {
+                    const votes = {};
+                    this.models.forEach(m => {
+                        const preds = m.predict(X);
+                        const pred = preds[i];
+                        votes[pred] = (votes[pred] || 0) + 1;
+                    });
+                    let maxVotes = 0;
+                    let bestClass = 0;
+                    for (const [cls, count] of Object.entries(votes)) {
+                        if (count > maxVotes) {
+                            maxVotes = count;
+                            bestClass = Number(cls);
+                        }
+                    }
+                    return bestClass;
+                });
+            },
+            predictProba(X) {
+                const modelsWithProba = this.models.filter(m => m.predictProba);
+                if (modelsWithProba.length === 0) return null;
+                const probas = modelsWithProba.map(m => m.predictProba(X));
+                return X.map((_, i) => {
+                    const nClasses = probas[0][i].length;
+                    const avgProba = Array(nClasses).fill(0);
+                    probas.forEach(p => {
+                        for (let c = 0; c < nClasses; c++) {
+                            avgProba[c] += (p[i][c] || 0);
+                        }
+                    });
+                    return avgProba.map(v => v / modelsWithProba.length);
+                });
+            },
+            getParams() { return { type: 'blend', nModels: this.models.length }; }
+        };
+
+        _state.blendedModel = blendedModel;
+
+        blendResults.innerHTML = `
+            <div style="background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1rem;">
+                <h4>ブレンド結果 (上位 ${topN} モデルの多数決投票)</h4>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                    使用モデル: ${topModels.map(m => m.badge).join(', ')}
+                </p>
+                <div class="table-container">
+                    <table class="table">
+                        <thead>
+                            <tr><th>指標</th><th>ベストモデル (${topModels[0].badge})</th><th>ブレンドモデル</th><th>変化</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Test F1</td>
+                                <td>${formatNumber(bestSingleF1)}</td>
+                                <td>${formatNumber(blendedF1)}</td>
+                                <td style="color: ${blendedF1 > bestSingleF1 ? '#10b981' : '#ef4444'};">
+                                    ${blendedF1 > bestSingleF1 ? '+' : ''}${formatNumber(blendedF1 - bestSingleF1)}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>Accuracy</td>
+                                <td>${formatNumber(topModels[0].acc)}</td>
+                                <td>${formatNumber(blendedAcc)}</td>
+                                <td style="color: ${blendedAcc > topModels[0].acc ? '#10b981' : '#ef4444'};">
+                                    ${blendedAcc > topModels[0].acc ? '+' : ''}${formatNumber(blendedAcc - topModels[0].acc)}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>Precision</td>
+                                <td>${formatNumber(topModels[0].prec)}</td>
+                                <td>${formatNumber(blendedPrec)}</td>
+                                <td style="color: ${blendedPrec > topModels[0].prec ? '#10b981' : '#ef4444'};">
+                                    ${blendedPrec > topModels[0].prec ? '+' : ''}${formatNumber(blendedPrec - topModels[0].prec)}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>Recall</td>
+                                <td>${formatNumber(topModels[0].rec)}</td>
+                                <td>${formatNumber(blendedRec)}</td>
+                                <td style="color: ${blendedRec > topModels[0].rec ? '#10b981' : '#ef4444'};">
+                                    ${blendedRec > topModels[0].rec ? '+' : ''}${formatNumber(blendedRec - topModels[0].rec)}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                ${blendedF1 > bestSingleF1
+                    ? `<p style="color: #10b981; font-weight: 600; margin-top: 1rem;">
+                        <i class="fas fa-check-circle"></i> ブレンドモデルがベストモデルを上回りました！predict_model でブレンドモデルを使用できます。
+                      </p>`
+                    : `<p style="color: #f59e0b; font-weight: 600; margin-top: 1rem;">
+                        <i class="fas fa-info-circle"></i> ブレンドモデルはベストモデルを上回りませんでした。単体モデルの方が適している可能性があります。
+                      </p>`
+                }
+            </div>
+        `;
+
+        // Add confusion matrix for blended model
+        const blendedCM = confusionMatrix(_state.yTest, blendedPred);
+        blendResults.querySelector('div').insertAdjacentHTML('beforeend', '<div id="blend-cm-plot" style="margin-top: 1.5rem;"></div>');
+        renderConfusionMatrix('blend-cm-plot', blendedCM.matrix, classLabels);
+
+    } catch (error) {
+        blendResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> ブレンドエラー: ${error.message}</p>`;
+        console.error('Blend error:', error);
+    }
+
+    btnBlend.disabled = false;
+}
+
+async function runFinalizeModel(container, result, featureNames) {
+    const finalizeResults = container.querySelector('#finalize-results');
+    const btnFinalize = container.querySelector('#btn-finalize');
+    btnFinalize.disabled = true;
+
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Blend', 'Finalize', 'Predict'], 5);
+
+    finalizeResults.innerHTML = `<div style="text-align: center; padding: 1rem;">
+        <i class="fas fa-spinner fa-spin" style="color: #dc2626;"></i>
+        <span style="margin-left: 0.5rem;">全データで再学習中...</span>
+    </div>`;
+
+    await new Promise(r => setTimeout(r, 100));
+
+    try {
+        const XFull = [..._state.XTrain, ..._state.XTest];
+        const yFull = [..._state.yTrain, ..._state.yTest];
+
+        const params = result.model.getParams ? result.model.getParams() : {};
+        const finalModel = new result.cls(params);
+        finalModel.fit(XFull, yFull);
+
+        _state.finalizedModel = finalModel;
+        _state.isFinalized = true;
+
+        const cvScores = crossValidate(finalModel, XFull, yFull, { cv: _state.cvFolds, scoring: 'f1' });
+        const cvMean = cvScores.reduce((a, b) => a + b, 0) / cvScores.length;
+        const cvStd = Math.sqrt(cvScores.reduce((a, v) => a + (v - cvMean) ** 2, 0) / cvScores.length);
+
+        finalizeResults.innerHTML = `
+            <div style="background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1rem;">
+                <h4><i class="fas fa-check-circle" style="color: #10b981;"></i> モデル確定完了</h4>
+                <p style="margin: 1rem 0;">
+                    <strong>${result.name}</strong> を全データ (${XFull.length} サンプル) で再学習しました。
+                </p>
+                <div class="metrics-grid" style="margin: 1rem 0;">
+                    ${createMetricCard('学習サンプル数', XFull.length, '訓練+テストの全データ')}
+                    ${createMetricCard('CV F1 (mean)', cvMean, `${_state.cvFolds}-Fold 全データCV`)}
+                    ${createMetricCard('CV F1 (std)', cvStd, '交差検証の標準偏差')}
+                </div>
+                <div style="background: #f0fdf4; padding: 1rem; border-radius: 8px; border-left: 4px solid #10b981;">
+                    <p style="color: #166534;">
+                        <i class="fas fa-info-circle"></i>
+                        これは本番用モデルです。predict_model では確定済みモデルで予測を行います。
+                        テストデータがなくなるため、テスト評価は行えませんが、CVスコアが参考になります。
+                    </p>
+                </div>
+            </div>
+        `;
+
+    } catch (error) {
+        finalizeResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 確定エラー: ${error.message}</p>`;
+        console.error('Finalize error:', error);
+    }
+
+    btnFinalize.disabled = false;
+}
+
 function runPredictModel(container, result, featureNames) {
     const predictResult = container.querySelector('#predict-result');
 
@@ -810,8 +1067,16 @@ function runPredictModel(container, result, featureNames) {
             processedInput = _state.scaler.transform(processedInput);
         }
 
-        const prediction = result.model.predict(processedInput);
-        const proba = result.model.predictProba ? result.model.predictProba(processedInput) : null;
+        // Use finalized model > blended model > original model
+        const activeModel = _state.finalizedModel || _state.blendedModel || result.model;
+        const modelLabel = _state.finalizedModel ? `${result.name} (確定済み)`
+                         : _state.blendedModel ? 'ブレンドモデル'
+                         : result.name;
+        const prediction = activeModel.predict(processedInput);
+        const proba = activeModel.predictProba ? activeModel.predictProba(processedInput) : null;
+
+        // Update step indicator
+        container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Blend', 'Finalize', 'Predict'], 6);
 
         // Convert numeric prediction back to label
         const predictedLabel = _state.labelEncoder
@@ -839,7 +1104,7 @@ function runPredictModel(container, result, featureNames) {
 
         predictResult.innerHTML = `
             <div style="background: white; padding: 1.5rem; border-radius: 8px; text-align: center;">
-                <p style="font-size: 0.9rem; color: var(--text-secondary);">予測結果 (${result.name})</p>
+                <p style="font-size: 0.9rem; color: var(--text-secondary);">予測結果 (${modelLabel})</p>
                 <p style="font-size: 2.5rem; font-weight: 700; color: #0891b2; margin: 0.5rem 0;">
                     ${predictedLabel}
                 </p>
