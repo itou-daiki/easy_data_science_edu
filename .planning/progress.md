@@ -252,3 +252,23 @@
   - data-requires="none" カード: 2枚正常設置
   - Font Awesome アイコン修正: fa-waveform → fa-wave-square (Free版対応)
 - **判定**: 採用
+
+## Iteration 10 (2026-03-02)
+- **目標**: 初学者向け学習ガイド + UX改善3点
+- **変更**:
+  - js/analyses/learning_guide.js: 新規作成 (~1241行)
+    - 6タブ: 機械学習とは/回帰と分類/モデルの評価/特徴量と前処理/アンサンブル学習/使い方
+    - Plotly.jsインタラクティブデモ (回帰直線, クラスタ, 混同行列, 学習曲線等)
+    - CSVデータ不要 (data-requires="none")
+    - ブルー/インディゴテーマ (#4f46e5)
+  - regression.js / classification.js: create_modelデフォルトをcompare 1位に (★1位マーク)
+  - css/style.css: パイプライン左端見切れ修正 (flex pseudo-element centering)
+  - image_classification.js: 予測時のstate参照バグ修正 (getter関数パターン)
+- **成功基準**: 学習ガイドが正常表示、パイプライン見切れ解消、create_modelデフォルト正常
+- **結果**:
+  - 学習ガイド: 6タブ全表示、インタラクティブチャート動作
+  - パイプライン: firstStepLeft(80) > containerLeft(64) で見切れ解消
+  - create_model: 「線形回帰 (Linear) ★1位」がデフォルト選択
+  - 画像分類予測: state getter関数でmobileNetModel/classifierが正しく参照される
+  - コンソールエラー: 0
+- **判定**: 採用
