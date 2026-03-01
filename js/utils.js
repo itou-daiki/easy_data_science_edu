@@ -243,7 +243,7 @@ export function formatNumber(value, decimals = 4) {
  * @returns {string}
  */
 export function createMetricCard(label, value, description = '', higherIsBetter = true) {
-    const formattedValue = formatNumber(value);
+    const formattedValue = Number.isInteger(value) ? value.toLocaleString() : formatNumber(value);
     return `<div class="metric-card">
         <div class="metric-label">${label}</div>
         <div class="metric-value">${formattedValue}</div>
