@@ -406,16 +406,17 @@ function _cloneModel(model) {
   if (typeof model.clone === 'function') {
     return model.clone();
   }
-  // Fall back to creating a new instance via the constructor
   try {
     const Constructor = model.constructor;
     if (Constructor && Constructor !== Object) {
-      return new Constructor(model.params || {});
+      const params = typeof model.getParams === 'function'
+        ? model.getParams()
+        : (model.params || {});
+      return new Constructor(params);
     }
   } catch {
     // ignore
   }
-  // Last resort: use the same instance (caller accepts the risk)
   return model;
 }
 
