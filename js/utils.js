@@ -421,6 +421,143 @@ export function renderResidualPlot(containerId, yTrue, yPred) {
  * @param {number[]} yProba - predicted probabilities for positive class
  * @param {number} auc
  */
+/**
+ * Renders permutation importance as horizontal bar chart with error bars.
+ * @param {string} containerId
+ * @param {string[]} featureNames
+ * @param {number[]} importancesMean
+ * @param {number[]} importancesStd
+ */
+export function renderPermutationImportance(containerId, featureNames, importancesMean, importancesStd) {
+    const indices = importancesMean.map((v, i) => i).sort((a, b) => importancesMean[a] - importancesMean[b]);
+    const sortedNames = indices.map(i => featureNames[i]);
+    const sortedMean = indices.map(i => importancesMean[i]);
+    const sortedStd = indices.map(i => importancesStd[i]);
+
+    const data = [{
+        type: 'bar',
+        x: sortedMean,
+        y: sortedNames,
+        orientation: 'h',
+        marker: { color: sortedMean.map(v => v > 0 ? '#10b981' : '#ef4444') },
+        error_x: {
+            type: 'data',
+            array: sortedStd,
+            visible: true,
+            color: '#94a3b8'
+        }
+    }];
+    const layout = {
+        title: 'Permutation Feature Importance',
+        xaxis: { title: 'スコア低下量（大きいほど重要）' },
+        margin: { l: 150 },
+        height: Math.max(300, sortedNames.length * 30)
+    };
+    renderPlot(containerId, data, layout);
+}
+
+/**
+ * Renders a Partial Dependence Plot for a single feature.
+ * @param {string} containerId
+ * @param {string} featureName
+ * @param {number[]} xValues - Feature values
+ * @param {number[]} pdpValues - Mean predictions at each feature value
+ * @param {string} [color='#3b82f6']
+ */
+export function renderPDP(containerId, featureName, xValues, pdpValues, color = '#3b82f6') {
+    const data = [{
+        x: xValues,
+        y: pdpValues,
+        mode: 'lines+markers',
+        type: 'scatter',
+        name: featureName,
+        line: { color, width: 2 },
+        marker: { size: 4 }
+    }];
+    const layout = {
+        title: `Partial Dependence: ${featureName}`,
+        xaxis: { title: featureName },
+        yaxis: { title: '予測値の変化' },
+        height: 350
+    };
+    renderPlot(containerId, data, layout);
+}
+
+/**
+ * Renders a learning curve showing train and validation scores.
+ * @param {string} containerId
+ * @param {number[]} trainSizes
+ * @param {number[]} trainScoresMean
+ * @param {number[]} trainScoresStd
+ * @param {number[]} testScoresMean
+ * @param {number[]} testScoresStd
+ * @param {string} [scoreName='R²']
+ */
+export function renderLearningCurve(containerId, trainSizes, trainScoresMean, trainScoresStd, testScoresMean, testScoresStd, scoreName = 'R²') {
+    const data = [
+        {
+            x: trainSizes,
+            y: trainScoresMean,
+            mode: 'lines+markers',
+            name: '訓練スコア',
+            line: { color: '#3b82f6', width: 2 },
+            marker: { size: 6 }
+        },
+        {
+            x: trainSizes,
+            y: trainScoresMean.map((v, i) => v + trainScoresStd[i]),
+            mode: 'lines',
+            name: '訓練スコア +1σ',
+            line: { color: '#3b82f6', width: 0 },
+            showlegend: false
+        },
+        {
+            x: trainSizes,
+            y: trainScoresMean.map((v, i) => v - trainScoresStd[i]),
+            mode: 'lines',
+            name: '訓練スコア -1σ',
+            line: { color: '#3b82f6', width: 0 },
+            fill: 'tonexty',
+            fillcolor: 'rgba(59,130,246,0.15)',
+            showlegend: false
+        },
+        {
+            x: trainSizes,
+            y: testScoresMean,
+            mode: 'lines+markers',
+            name: '検証スコア',
+            line: { color: '#ef4444', width: 2 },
+            marker: { size: 6 }
+        },
+        {
+            x: trainSizes,
+            y: testScoresMean.map((v, i) => v + testScoresStd[i]),
+            mode: 'lines',
+            name: '検証スコア +1σ',
+            line: { color: '#ef4444', width: 0 },
+            showlegend: false
+        },
+        {
+            x: trainSizes,
+            y: testScoresMean.map((v, i) => v - testScoresStd[i]),
+            mode: 'lines',
+            name: '検証スコア -1σ',
+            line: { color: '#ef4444', width: 0 },
+            fill: 'tonexty',
+            fillcolor: 'rgba(239,68,68,0.15)',
+            showlegend: false
+        }
+    ];
+    const layout = {
+        title: 'Learning Curve（学習曲線）',
+        xaxis: { title: '訓練サンプル数' },
+        yaxis: { title: scoreName },
+        height: 400,
+        legend: { x: 0.6, y: 0.1 }
+    };
+    renderPlot(containerId, data, layout);
+}
+
 export function renderROCCurve(containerId, yTrue, yProba, auc) {
     const thresholds = Array.from({ length: 101 }, (_, i) => i / 100);
     const points = thresholds.map(t => {

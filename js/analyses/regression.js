@@ -2,9 +2,9 @@
 // 回帰モデル比較 (AutoML) Module
 // PyCaret-style: setup → compare_models (CV) → tune_model → predict_model
 // ==========================================
-import { createSelect, createStepIndicator, formatNumber, renderPlot, renderActualVsPredicted, renderResidualPlot, renderFeatureImportance, createMetricCard } from '../utils.js';
+import { createSelect, createStepIndicator, formatNumber, renderPlot, renderActualVsPredicted, renderResidualPlot, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve } from '../utils.js';
 import { prepareFeatures } from '../ml/preprocessing.js';
-import { trainTestSplit, crossValidate, gridSearch } from '../ml/model_selection.js';
+import { trainTestSplit, crossValidate, gridSearch, permutationImportance, learningCurve } from '../ml/model_selection.js';
 import { meanAbsoluteError, meanSquaredError, rootMeanSquaredError, rSquared, adjustedRSquared } from '../ml/metrics.js';
 import { LinearRegression } from '../ml/regression/linear.js';
 import { RidgeRegression } from '../ml/regression/ridge.js';
@@ -46,7 +46,7 @@ export function render(container, data, characteristics) {
             PyCaret のように複数の回帰モデルを一括学習・比較し、最適なモデルを見つけます。
         </p>
 
-        ${createStepIndicator(['Setup', 'Compare', 'Tune', 'Predict'], 0)}
+        ${createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Predict'], 0)}
 
         <div id="setup-section" class="model-config">
             <h3><i class="fas fa-cog"></i> Step 1: セットアップ</h3>
@@ -148,7 +148,7 @@ async function runComparison(container, data, characteristics) {
     container.querySelector('#setup-section').style.display = 'none';
     container.querySelector('#compare-section').style.display = 'block';
 
-    container.querySelector('.step-indicator').innerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Predict'], 1).replace(/<\/?div[^>]*class="step-indicator"[^>]*>/g, '');
+    container.querySelector('.step-indicator').innerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Predict'], 1).replace(/<\/?div[^>]*class="step-indicator"[^>]*>/g, '');
 
     const progressArea = container.querySelector('#progress-area');
     progressArea.innerHTML = `<div style="text-align: center; padding: 2rem;">
@@ -299,7 +299,7 @@ function showModelDetail(container, result, yTest, featureNames) {
     const evalSection = container.querySelector('#evaluate-section');
     evalSection.style.display = 'block';
 
-    container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Predict'], 2);
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Predict'], 2);
 
     const evalContent = container.querySelector('#evaluation-content');
     const hasTuneGrid = PARAM_GRIDS[result.badge] != null;
@@ -344,6 +344,18 @@ function showModelDetail(container, result, yTest, featureNames) {
         </div>
         ` : ''}
 
+        <!-- Interpret Model Section -->
+        <div style="margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, #f0fdf4, #dcfce7); border-radius: 12px;">
+            <h4><i class="fas fa-search-plus" style="color: #16a34a;"></i> interpret_model - モデル解釈</h4>
+            <p style="color: #166534; margin: 0.5rem 0;">
+                Permutation Feature Importance、Partial Dependence Plot (PDP)、Learning Curve でモデルを深く理解します。
+            </p>
+            <button id="btn-interpret" class="btn-analysis" style="background: #16a34a; margin-top: 1rem;">
+                <i class="fas fa-microscope"></i> interpret_model を実行
+            </button>
+            <div id="interpret-results" style="margin-top: 1rem;"></div>
+        </div>
+
         <!-- Predict Section -->
         <div style="margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, #dbeafe, #bfdbfe); border-radius: 12px;">
             <h4><i class="fas fa-calculator" style="color: #2563eb;"></i> predict_model - 新しいデータで予測</h4>
@@ -378,6 +390,11 @@ function showModelDetail(container, result, yTest, featureNames) {
             runTuneModel(container, result, featureNames);
         });
     }
+
+    // Interpret button handler
+    container.querySelector('#btn-interpret').addEventListener('click', () => {
+        runInterpretModel(container, result, featureNames);
+    });
 
     // Predict button handler
     container.querySelector('#btn-predict').addEventListener('click', () => {
@@ -516,6 +533,169 @@ async function runTuneModel(container, result, featureNames) {
     }
 
     btnTune.disabled = false;
+}
+
+async function runInterpretModel(container, result, featureNames) {
+    const interpretResults = container.querySelector('#interpret-results');
+    const btnInterpret = container.querySelector('#btn-interpret');
+    btnInterpret.disabled = true;
+
+    // Update step indicator
+    container.querySelector('.step-indicator').outerHTML = createStepIndicator(['Setup', 'Compare', 'Tune', 'Interpret', 'Predict'], 3);
+
+    interpretResults.innerHTML = `<div style="text-align: center; padding: 1rem;">
+        <i class="fas fa-spinner fa-spin" style="color: #16a34a;"></i>
+        <span style="margin-left: 0.5rem;">モデル解釈を計算中...</span>
+    </div>`;
+
+    await new Promise(r => setTimeout(r, 100));
+
+    try {
+        let html = '<div style="background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1rem;">';
+
+        // 1. Permutation Feature Importance
+        html += '<h4><i class="fas fa-sort-amount-down" style="color: #16a34a;"></i> Permutation Feature Importance</h4>';
+        html += '<p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">各特徴量をシャッフルしてスコアへの影響を計測。モデルに依存しない汎用的な重要度指標です。</p>';
+        html += '<div id="perm-importance-plot"></div>';
+
+        // 2. PDP
+        html += '<h4 style="margin-top: 2rem;"><i class="fas fa-chart-line" style="color: #16a34a;"></i> Partial Dependence Plot (PDP)</h4>';
+        html += '<p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 0.5rem;">各特徴量が予測値にどう影響するかを可視化します。</p>';
+        html += '<div style="margin-bottom: 1rem;"><label style="font-weight: 600; margin-right: 0.5rem;">特徴量を選択:</label>';
+        html += `<select id="pdp-feature-select" class="form-select" style="display: inline-block; width: auto;">
+            ${featureNames.map((f, i) => `<option value="${i}">${f}</option>`).join('')}
+        </select></div>`;
+        html += '<div id="pdp-plot"></div>';
+
+        // 3. Learning Curve
+        html += '<h4 style="margin-top: 2rem;"><i class="fas fa-graduation-cap" style="color: #16a34a;"></i> Learning Curve（学習曲線）</h4>';
+        html += '<p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">訓練データ量と性能の関係を可視化。過学習・未学習の診断に使います。</p>';
+        html += '<div id="learning-curve-plot"></div>';
+
+        // 4. Interpretation
+        html += '<div id="interpret-analysis" style="margin-top: 2rem;"></div>';
+
+        html += '</div>';
+        interpretResults.innerHTML = html;
+
+        // Compute permutation importance
+        const { importancesMean, importancesStd } = permutationImportance(
+            result.model, _state.XTest, _state.yTest,
+            { scoring: 'r2', nRepeats: 5 }
+        );
+        renderPermutationImportance('perm-importance-plot', featureNames, importancesMean, importancesStd);
+
+        // Compute PDP for the first feature initially
+        computeAndRenderPDP(result.model, featureNames, 0);
+
+        // PDP feature selector
+        container.querySelector('#pdp-feature-select').addEventListener('change', (e) => {
+            computeAndRenderPDP(result.model, featureNames, parseInt(e.target.value));
+        });
+
+        // Compute learning curve
+        const lcResult = learningCurve(
+            result.cls, result.model.getParams ? result.model.getParams() : {},
+            _state.XTrain, _state.yTrain,
+            { cv: Math.min(_state.cvFolds, 3), scoring: 'r2' }
+        );
+        renderLearningCurve(
+            'learning-curve-plot',
+            lcResult.trainSizes,
+            lcResult.trainScoresMean, lcResult.trainScoresStd,
+            lcResult.testScoresMean, lcResult.testScoresStd,
+            'R²'
+        );
+
+        // Generate interpretation analysis
+        const analysisHtml = generateInterpretAnalysis(featureNames, importancesMean, lcResult);
+        container.querySelector('#interpret-analysis').innerHTML = analysisHtml;
+
+    } catch (error) {
+        interpretResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 解釈エラー: ${error.message}</p>`;
+        console.error('Interpret error:', error);
+    }
+
+    btnInterpret.disabled = false;
+}
+
+function computeAndRenderPDP(model, featureNames, featureIndex) {
+    const X = _state.XTest;
+    const nGrid = 30;
+
+    // Get range of the feature
+    const featureValues = X.map(row => row[featureIndex]);
+    const minVal = Math.min(...featureValues);
+    const maxVal = Math.max(...featureValues);
+    const step = (maxVal - minVal) / (nGrid - 1);
+    const gridValues = Array.from({ length: nGrid }, (_, i) => minVal + i * step);
+
+    // Compute partial dependence
+    const pdpValues = gridValues.map(gridVal => {
+        const XModified = X.map(row => {
+            const newRow = [...row];
+            newRow[featureIndex] = gridVal;
+            return newRow;
+        });
+        const preds = model.predict(XModified);
+        return preds.reduce((a, b) => a + b, 0) / preds.length;
+    });
+
+    renderPDP('pdp-plot', featureNames[featureIndex], gridValues, pdpValues, '#16a34a');
+}
+
+function generateInterpretAnalysis(featureNames, importancesMean, lcResult) {
+    // Find most important features
+    const indexed = importancesMean.map((v, i) => ({ name: featureNames[i], importance: v }));
+    indexed.sort((a, b) => b.importance - a.importance);
+    const topFeatures = indexed.filter(f => f.importance > 0).slice(0, 3);
+
+    // Learning curve analysis
+    const lastTrainScore = lcResult.trainScoresMean[lcResult.trainScoresMean.length - 1];
+    const lastTestScore = lcResult.testScoresMean[lcResult.testScoresMean.length - 1];
+    const gap = lastTrainScore - lastTestScore;
+
+    let html = `
+        <h4><i class="fas fa-lightbulb" style="color: #d97706;"></i> 解釈の総合分析</h4>
+        <div style="background: #f8fafc; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #16a34a; line-height: 1.8;">
+            <p><strong>重要な特徴量:</strong></p>
+            <ul>
+    `;
+
+    if (topFeatures.length > 0) {
+        topFeatures.forEach((f, i) => {
+            html += `<li><strong>${f.name}</strong> (重要度: ${f.importance.toFixed(4)}) - `;
+            if (i === 0) html += 'このモデルで最も予測に寄与する特徴量です。';
+            else html += '予測に重要な特徴量です。';
+            html += '</li>';
+        });
+    } else {
+        html += '<li>全ての特徴量の重要度が低い、またはモデルが十分に学習できていません。</li>';
+    }
+
+    html += '</ul><p style="margin-top: 1rem;"><strong>学習曲線の分析:</strong></p><ul>';
+
+    if (gap > 0.15) {
+        html += `<li style="color: #ef4444;"><strong>過学習の兆候</strong>: 訓練スコア (${lastTrainScore.toFixed(3)}) と検証スコア (${lastTestScore.toFixed(3)}) の差が大きい (${gap.toFixed(3)})。正則化の強化やデータ追加を検討してください。</li>`;
+    } else if (gap > 0.05) {
+        html += `<li style="color: #f59e0b;">訓練スコアと検証スコアにやや差があります (gap=${gap.toFixed(3)})。軽度の過学習の可能性。</li>`;
+    } else {
+        html += `<li style="color: #10b981;">訓練スコアと検証スコアが近く (gap=${gap.toFixed(3)})、<strong>良好な汎化性能</strong>を示しています。</li>`;
+    }
+
+    if (lastTestScore < 0.5) {
+        html += '<li style="color: #ef4444;"><strong>未学習の兆候</strong>: 検証スコアが低いため、より複雑なモデルや特徴量エンジニアリングを検討してください。</li>';
+    }
+
+    const earlyTestScore = lcResult.testScoresMean[0];
+    if (lastTestScore - earlyTestScore > 0.05) {
+        html += '<li>データ量の増加でスコアが向上しているため、<strong>追加データ収集が効果的</strong>と考えられます。</li>';
+    } else {
+        html += '<li>データ量増加による改善が小さいため、特徴量の改善やモデルの変更がより効果的です。</li>';
+    }
+
+    html += '</ul></div>';
+    return html;
 }
 
 function runPredictModel(container, result, featureNames) {

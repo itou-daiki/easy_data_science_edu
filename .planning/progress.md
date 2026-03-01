@@ -57,3 +57,43 @@
   - predict_model(): ✅ (新規データ予測)
   - 未実装: blend/stack_models, SHAP, create_model個別
 - **判定**: 採用
+
+## Iteration 4 (2026-03-02)
+- **目標**: PyCaret トレース率向上 (~70% → ~85%) - interpret_model + Learning Curve
+- **変更**:
+  - model_selection.js: `permutationImportance()` 追加 (特徴量シャッフルによる汎用的重要度計測)
+  - model_selection.js: `learningCurve()` 追加 (訓練サイズ vs スコアの可視化)
+  - utils.js: `renderPermutationImportance()`, `renderPDP()`, `renderLearningCurve()` 追加
+  - regression.js: interpret_model セクション追加 (602→781行)
+    - Permutation Feature Importance (error bar付き)
+    - Partial Dependence Plot (特徴量セレクタ付き)
+    - Learning Curve (訓練/検証の信頼区間付き)
+    - 解釈の総合分析 (過学習/未学習の自動診断)
+    - ステップインジケータ: 4段→5段 (Setup/Compare/Tune/Interpret/Predict)
+  - classification.js: 同等の interpret_model 追加 (698→892行)
+    - F1スコアベースの Permutation Importance
+    - predictProba 対応 PDP (確率ベース)
+    - F1ベース Learning Curve
+- **成功基準**: interpret_model の3プロット + 総合分析がブラウザで動作すること
+- **結果**: 全検証パス
+  - 回帰 interpret_model:
+    - Permutation Importance: 面積（重要度1.7815）> 駅徒歩分(0.1360) > 築年数(0.1073) 正常
+    - PDP: 面積のPartial Dependence 正常描画、特徴量切替正常
+    - Learning Curve: 訓練/検証スコア曲線+信頼区間 正常描画
+    - 総合分析: 「良好な汎化性能 (gap=0.002)」「追加データ収集が効果的」
+  - 分類 interpret_model:
+    - Permutation Importance: 利用頻度(0.0771) > 年齢(0.0513) > 月額料金(0.0178) 正常
+    - PDP: predictProba ベースの確率PDP 正常描画
+    - Learning Curve: F1スコアベース曲線 正常描画
+    - 総合分析: 「軽度の過学習の可能性 (gap=0.091)」「追加データ収集が効果的」
+  - コンソールエラー: 0 (favicon除く)
+- **PyCaret トレース率**: ~70% → ~85%
+  - setup(): ✅
+  - compare_models(): ✅
+  - tune_model(): ✅
+  - evaluate_model(): ✅
+  - predict_model(): ✅
+  - interpret_model(): ✅ (Permutation Importance + PDP + Learning Curve)
+  - plot_model(): ✅ (Learning Curve)
+  - 未実装: blend/stack_models, SHAP, create_model個別, finalize_model
+- **判定**: 採用

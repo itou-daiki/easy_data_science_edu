@@ -503,3 +503,138 @@ function _cartesianProduct(arrays) {
     [[]]
   );
 }
+
+// ===========================================================================
+// permutationImportance
+// ===========================================================================
+
+/**
+ * Compute permutation feature importance.
+ *
+ * For each feature, shuffle its values nRepeats times and measure
+ * the decrease in model score compared to the baseline.
+ *
+ * @param {{ predict(X: Array[]): Array }} model - A fitted model
+ * @param {Array<Array<number>>} X - Feature matrix
+ * @param {Array<number>} y - Target array
+ * @param {Object} [options]
+ * @param {'r2'|'accuracy'|'f1'|string} [options.scoring='r2']
+ * @param {number} [options.nRepeats=5]
+ * @param {number} [options.randomState=42]
+ * @returns {{ importances: number[][], importancesMean: number[], importancesStd: number[] }}
+ */
+export function permutationImportance(model, X, y, options = {}) {
+  _validateXY(X, y, 'permutationImportance');
+  const { scoring = 'r2', nRepeats = 5, randomState = 42 } = options;
+  const scorer = _getScorer(scoring);
+  const rng = _createRng(randomState);
+
+  // Baseline score
+  const yPredBaseline = model.predict(X);
+  const baselineScore = scorer(y, yPredBaseline);
+
+  const nFeatures = X[0].length;
+  const importances = []; // [nFeatures][nRepeats]
+
+  for (let f = 0; f < nFeatures; f++) {
+    const featureScores = [];
+    for (let r = 0; r < nRepeats; r++) {
+      // Create a copy of X with feature f shuffled
+      const XShuffled = X.map(row => [...row]);
+      const colValues = XShuffled.map(row => row[f]);
+      const shuffledCol = _shuffle(colValues, rng);
+      for (let i = 0; i < XShuffled.length; i++) {
+        XShuffled[i][f] = shuffledCol[i];
+      }
+
+      const yPredShuffled = model.predict(XShuffled);
+      const shuffledScore = scorer(y, yPredShuffled);
+      featureScores.push(baselineScore - shuffledScore);
+    }
+    importances.push(featureScores);
+  }
+
+  const importancesMean = importances.map(scores =>
+    scores.reduce((a, b) => a + b, 0) / scores.length
+  );
+  const importancesStd = importances.map((scores, i) => {
+    const mean = importancesMean[i];
+    return Math.sqrt(scores.reduce((a, v) => a + (v - mean) ** 2, 0) / scores.length);
+  });
+
+  return { importances, importancesMean, importancesStd };
+}
+
+// ===========================================================================
+// learningCurve
+// ===========================================================================
+
+/**
+ * Compute learning curve: train and validation scores at varying training sizes.
+ *
+ * @param {Function} ModelClass - Constructor for the model
+ * @param {Object} params - Parameters for the model constructor
+ * @param {Array<Array<number>>} X - Feature matrix
+ * @param {Array<number>} y - Target array
+ * @param {Object} [options]
+ * @param {number[]} [options.trainSizes] - Fractions of training data (default [0.1, 0.3, 0.5, 0.7, 0.9, 1.0])
+ * @param {number} [options.cv=3]
+ * @param {'r2'|'accuracy'|'f1'|string} [options.scoring='r2']
+ * @returns {{ trainSizes: number[], trainScoresMean: number[], trainScoresStd: number[], testScoresMean: number[], testScoresStd: number[] }}
+ */
+export function learningCurve(ModelClass, params, X, y, options = {}) {
+  _validateXY(X, y, 'learningCurve');
+  const {
+    trainSizes = [0.1, 0.3, 0.5, 0.7, 0.9, 1.0],
+    cv = 3,
+    scoring = 'r2',
+  } = options;
+
+  const scorer = _getScorer(scoring);
+  const kf = new KFold({ nSplits: cv, shuffle: true, randomState: 42 });
+
+  const actualSizes = [];
+  const trainScoresMean = [];
+  const trainScoresStd = [];
+  const testScoresMean = [];
+  const testScoresStd = [];
+
+  for (const sizeFrac of trainSizes) {
+    const foldTrainScores = [];
+    const foldTestScores = [];
+
+    for (const [trainIdx, testIdx] of kf.split(X)) {
+      const XTrainFull = _selectByIndices(X, trainIdx);
+      const yTrainFull = _selectByIndices(y, trainIdx);
+      const XTest = _selectByIndices(X, testIdx);
+      const yTest = _selectByIndices(y, testIdx);
+
+      // Subsample training data
+      const nSubsample = Math.max(2, Math.round(XTrainFull.length * sizeFrac));
+      const XTrainSub = XTrainFull.slice(0, nSubsample);
+      const yTrainSub = yTrainFull.slice(0, nSubsample);
+
+      const model = new ModelClass(params);
+      model.fit(XTrainSub, yTrainSub);
+
+      const yPredTrain = model.predict(XTrainSub);
+      const yPredTest = model.predict(XTest);
+
+      foldTrainScores.push(scorer(yTrainSub, yPredTrain));
+      foldTestScores.push(scorer(yTest, yPredTest));
+    }
+
+    const trainMean = foldTrainScores.reduce((a, b) => a + b, 0) / foldTrainScores.length;
+    const testMean = foldTestScores.reduce((a, b) => a + b, 0) / foldTestScores.length;
+    const trainStd = Math.sqrt(foldTrainScores.reduce((a, v) => a + (v - trainMean) ** 2, 0) / foldTrainScores.length);
+    const testStd = Math.sqrt(foldTestScores.reduce((a, v) => a + (v - testMean) ** 2, 0) / foldTestScores.length);
+
+    actualSizes.push(Math.round(X.length * (1 - 1 / cv) * sizeFrac));
+    trainScoresMean.push(trainMean);
+    trainScoresStd.push(trainStd);
+    testScoresMean.push(testMean);
+    testScoresStd.push(testStd);
+  }
+
+  return { trainSizes: actualSizes, trainScoresMean, trainScoresStd, testScoresMean, testScoresStd };
+}
