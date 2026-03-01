@@ -243,6 +243,46 @@
                     </div>
                 </div>
 
+                <!-- 画像分類 -->
+                <div class="category-section category-image">
+                    <div class="category-header">
+                        <div class="category-icon"><i class="fas fa-image"></i></div>
+                        <div class="category-info">
+                            <h3>画像分類（ディープラーニング）</h3>
+                            <p>MobileNet 転移学習を用いて、ブラウザ上で画像分類モデルを構築します</p>
+                        </div>
+                    </div>
+                    <div class="category-cards">
+                        <div class="feature-card" data-analysis="image_classification" data-requires="none">
+                            <h3 class="feature-card-title">
+                                <i class="fas fa-camera feature-card-icon"></i>
+                                画像分類 (MobileNet)
+                            </h3>
+                            <p class="feature-card-description">画像をアップロードしてカテゴリを学習・予測します。CSVデータ不要で利用できます</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 音声分類 -->
+                <div class="category-section category-audio">
+                    <div class="category-header">
+                        <div class="category-icon"><i class="fas fa-microphone"></i></div>
+                        <div class="category-info">
+                            <h3>音声分類（ディープラーニング）</h3>
+                            <p>マイクで録音した音声をスペクトル特徴量に変換し、ブラウザ上で分類モデルを構築します</p>
+                        </div>
+                    </div>
+                    <div class="category-cards">
+                        <div class="feature-card" data-analysis="audio_classification" data-requires="none">
+                            <h3 class="feature-card-title">
+                                <i class="fas fa-wave-square feature-card-icon"></i>
+                                音声分類 (Web Audio)
+                            </h3>
+                            <p class="feature-card-description">マイクで録音した音声からカテゴリを学習・予測します。CSVデータ不要で利用できます</p>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
 
@@ -282,6 +322,7 @@
                         <li><strong>データプライバシー:</strong> データはブラウザ内で処理され、外部サーバーに送信されません</li>
                         <li><strong>AutoML機能:</strong> PyCaret のように複数モデルを自動で学習・比較</li>
                         <li><strong>回帰・分類対応:</strong> 連続値予測とカテゴリ分類の両方に対応</li>
+                        <li><strong>画像・音声分類:</strong> TensorFlow.js による転移学習で画像分類、Web Audio API で音声分類が可能</li>
                         <li><strong>日本語対応:</strong> UIと分析結果の解釈がすべて日本語</li>
                         <li><strong>教育的:</strong> 機械学習手法の説明と結果の解釈を提供</li>
                     </ul>
@@ -323,6 +364,14 @@
                         <div class="method-item">
                             <i class="fas fa-layer-group"></i>
                             <span>勾配ブースティング</span>
+                        </div>
+                        <div class="method-item">
+                            <i class="fas fa-camera"></i>
+                            <span>MobileNet 画像分類</span>
+                        </div>
+                        <div class="method-item">
+                            <i class="fas fa-microphone"></i>
+                            <span>音声スペクトル分類</span>
                         </div>
                     </div>
                 </div>
@@ -394,6 +443,10 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jstat@latest/dist/jstat.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.7.0/math.min.js"></script>
+
+    <!-- TensorFlow.js (for Image/Audio Classification) -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0/dist/mobilenet.min.js"></script>
 
     <!-- Custom JavaScript -->
     <script type="module" src="js/main.js"></script>
