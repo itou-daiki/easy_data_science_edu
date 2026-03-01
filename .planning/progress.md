@@ -221,3 +221,34 @@
   - Preprocess ステップ: 前処理自動化サマリー表示
   - パイプライン: 10段 (Setup→Preprocess→Compare→Create→Tune→Interpret→Blend→Stack→Finalize→Predict)
 - **判定**: 採用
+
+## Iteration 9 (2026-03-02)
+- **目標**: 画像分類・音声分類モジュール追加 (TensorFlow.js ディープラーニング)
+- **変更**:
+  - js/analyses/image_classification.js: 新規作成 (~1064行)
+    - MobileNet v2 転移学習による画像分類
+    - ドラッグ&ドロップ画像アップロード + サムネイル表示
+    - 4段パイプライン: データ準備→学習→評価→予測
+    - Dense分類器: MobileNet embeddings → 128 → dropout → numClasses(softmax)
+    - エポック数/バリデーション分割の設定可能
+    - 混同行列 + クラス別精度表示
+    - エメラルドグリーンテーマ (#059669)
+  - js/analyses/audio_classification.js: 新規作成 (~952行)
+    - Web Audio API + MediaRecorder で3秒音声録音
+    - スペクトル特徴量抽出: 20フレーム × 4特徴 = 80次元ベクトル
+      (RMS energy, Zero Crossing Rate, Spectral Centroid, Spectral Rolloff)
+    - カスタムRadix-2 FFT実装
+    - Dense NN: 80 → 64 → dropout → 32 → dropout → numClasses(softmax)
+    - 波形キャンバス可視化
+    - パープルテーマ (#7c3aed)
+  - index.html: TensorFlow.js / MobileNet CDN追加 + 画像・音声カテゴリセクション追加
+  - css/style.css: category-image / category-audio テーマカラー追加
+- **成功基準**: モジュールが正しく読み込まれ、データ不要で動作すること
+- **結果**:
+  - TensorFlow.js CDN (4.17.0): HTTP 200 確認
+  - MobileNet CDN (2.1.0): HTTP 200 確認
+  - image_classification.js: HTTPサーバーから正常配信確認
+  - audio_classification.js: HTTPサーバーから正常配信確認
+  - data-requires="none" カード: 2枚正常設置
+  - Font Awesome アイコン修正: fa-waveform → fa-wave-square (Free版対応)
+- **判定**: 採用
