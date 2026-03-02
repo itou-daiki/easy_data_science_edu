@@ -323,3 +323,23 @@
   - 再学習フロー: 22/22 (MobileNet実学習→戻る→再学習→メトリクス更新→予測)
   - 3並列エージェント詳細分析: リスナーリーク5/5 SAFE, 状態管理6/6 SAFE, 再学習22/22 PASSED
 - **判定**: 採用
+
+## Iteration 14 (2026-03-02) — モデル解釈可能性機能（PCA・信頼度分析・オクルージョン感度）
+- **目標**: 画像分類モデルがどのような特徴を学習したか可視化する3つのXAI手法を実装
+- **変更**:
+  - js/analyses/image_classification.js: (1184行 → 1638行, +454行)
+    - `runTraining`: サムネイル収集, 埋め込み保存, 全サンプル予測確率をhistoryに追加
+    - `computePCA2D()`: Power iteration法による1280次元→2次元PCA射影（外部ライブラリ不要）
+    - `renderPCAChart()`: Plotly.jsスキャッタープロットでクラス別色分け特徴空間表示
+    - `renderConfidenceAnalysis()`: 各クラスの最高/最低信頼度画像 + 誤分類画像表示
+    - `computeOcclusionMap()`: 56×56グレーパッチを28pxストライドで信頼度変化を測定
+    - `renderOcclusionHeatmap()`: 赤（重要）/青（抑制）のキャンバスオーバーレイ描画
+    - `renderInsights()`: 3手法のオーケストレーション関数
+- **技術選定の根拠**:
+  - Grad-CAM非採用: MobileNetがGraphModelでLayerアクセス制限
+  - t-SNE非採用: npmパッケージ未メンテナンス
+  - LIME非採用: JSスーパーピクセルライブラリ不在
+- **検証結果 (22テスト ALL PASSED)**:
+  - HTMLテンプレート: 8/8, PCA: 3/3, 信頼度: 4/4, オクルージョン: 4/4, ローディング: 1/1, エラー: 1/1
+  - バックナビゲーション互換性: 全テスト通過
+- **判定**: 採用

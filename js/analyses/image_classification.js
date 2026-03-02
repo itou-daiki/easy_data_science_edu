@@ -397,6 +397,53 @@ export function render(container, _data, _characteristics) {
                     </h4>
                     <div id="ic-confusion-matrix" style="max-width: 500px; margin: 0 auto;"></div>
                 </div>
+                <!-- Model Insights Section -->
+                <div id="ic-insights-section" style="margin-top: 2rem;">
+                    <h3 style="font-size: 1.1rem; margin-bottom: 1rem; border-top: 2px solid ${THEME_COLOR_BORDER}; padding-top: 1.5rem;">
+                        <i class="fas fa-brain" style="color: ${THEME_COLOR};"></i> モデルの学習内容を理解する
+                    </h3>
+                    <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 1.5rem;">
+                        モデルがどのような特徴を捉えて分類しているかを、3つの視点から分析します。
+                    </p>
+                    <div id="ic-insights-loading" style="text-align: center; padding: 2rem; color: var(--text-secondary);">
+                        <i class="fas fa-spinner fa-spin" style="font-size: 1.5rem; color: ${THEME_COLOR};"></i>
+                        <p style="margin-top: 0.5rem;">分析中...</p>
+                    </div>
+                    <!-- 1. PCA Feature Space -->
+                    <div id="ic-pca-section" style="display: none; margin-bottom: 2rem;">
+                        <h4 style="font-size: 0.95rem; margin-bottom: 0.5rem;">
+                            <i class="fas fa-project-diagram" style="color: ${THEME_COLOR};"></i> 特徴空間の可視化 (PCA)
+                        </h4>
+                        <p style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 0.75rem;">
+                            MobileNetが抽出した1280次元の特徴を2次元に圧縮したものです。
+                            同じクラスの画像が近くに集まっているほど、モデルはクラスをよく区別できています。
+                        </p>
+                        <div id="ic-pca-chart" style="width: 100%; height: 400px;"></div>
+                    </div>
+                    <!-- 2. Confidence Analysis -->
+                    <div id="ic-confidence-section" style="display: none; margin-bottom: 2rem;">
+                        <h4 style="font-size: 0.95rem; margin-bottom: 0.5rem;">
+                            <i class="fas fa-star-half-alt" style="color: ${THEME_COLOR};"></i> 信頼度分析
+                        </h4>
+                        <p style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 0.75rem;">
+                            モデルが最も自信を持って正しく分類した画像と、判断に迷った画像を表示します。
+                            誤分類された画像がある場合、何と間違えたかも確認できます。
+                        </p>
+                        <div id="ic-confidence-content"></div>
+                    </div>
+                    <!-- 3. Occlusion Sensitivity -->
+                    <div id="ic-occlusion-section" style="display: none; margin-bottom: 2rem;">
+                        <h4 style="font-size: 0.95rem; margin-bottom: 0.5rem;">
+                            <i class="fas fa-eye" style="color: ${THEME_COLOR};"></i> 注目領域の可視化（オクルージョン感度）
+                        </h4>
+                        <p style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 0.75rem;">
+                            画像の各領域を隠したときの予測変化を調べ、モデルが分類に重要視している部分を
+                            ヒートマップで表示します。<span style="color: #ef4444;">赤い領域</span>ほど分類に重要な部分です。
+                        </p>
+                        <div id="ic-occlusion-content"></div>
+                    </div>
+                </div>
+
                 <button id="ic-go-predict-btn" class="btn-analysis"
                         style="background: ${THEME_COLOR}; margin-top: 1.5rem;">
                     <i class="fas fa-arrow-right"></i> 予測に進む
@@ -782,15 +829,17 @@ async function runTraining(container, state) {
 
     const allFeatures = [];
     const allLabels = [];
+    const allThumbnails = [];
     const classNames = state.classes.map(c => c.name);
     const numClasses = classNames.length;
 
     for (let ci = 0; ci < state.classes.length; ci++) {
         const cls = state.classes[ci];
-        for (const img of cls.images) {
-            const embedding = mobileNetModel.infer(img, true);
+        for (let imgIdx = 0; imgIdx < cls.images.length; imgIdx++) {
+            const embedding = mobileNetModel.infer(cls.images[imgIdx], true);
             allFeatures.push(embedding);
             allLabels.push(ci);
+            allThumbnails.push(cls.thumbnails[imgIdx]);
         }
         log(`[OK] ${cls.name}: ${cls.images.length}枚の特徴量抽出完了`);
     }
@@ -875,6 +924,15 @@ async function runTraining(container, state) {
     const valPredIndices = valPredTensor.argMax(1).arraySync();
     const valTrueIndices = valLabels.argMax(1).arraySync();
 
+    // Save embeddings for visualization before disposal
+    const embeddingsForViz = featuresTensor.arraySync();
+    const labelsForViz = [...allLabels];
+
+    // Compute per-sample confidence for insights
+    const allPredTensor = classifier.predict(featuresTensor);
+    const allProbabilities = allPredTensor.arraySync();
+    allPredTensor.dispose();
+
     // Cleanup intermediate tensors
     featuresTensor.dispose();
     labelsTensor.dispose();
@@ -899,7 +957,11 @@ async function runTraining(container, state) {
             valPredIndices,
             valTrueIndices,
             trainSize,
-            valSize
+            valSize,
+            embeddingsForViz,
+            labelsForViz,
+            allThumbnails,
+            allProbabilities
         }
     };
 }
@@ -992,6 +1054,9 @@ function renderEvaluation(container, state) {
 
     // Confusion matrix
     renderConfusionMatrixSection(container, history);
+
+    // Model insights (async - runs after evaluation UI is shown)
+    renderInsights(container, state);
 }
 
 function renderPerClassAccuracy(container, history) {
@@ -1033,6 +1098,391 @@ function renderConfusionMatrixSection(container, history) {
     });
 
     renderConfusionMatrix('ic-confusion-matrix', matrix, classNames);
+}
+
+// ==========================================
+// Model Insights
+// ==========================================
+
+function computePCA2D(embeddings) {
+    const n = embeddings.length;
+    const d = embeddings[0].length;
+
+    const mean = new Float64Array(d);
+    for (let i = 0; i < n; i++) {
+        for (let j = 0; j < d; j++) mean[j] += embeddings[i][j];
+    }
+    for (let j = 0; j < d; j++) mean[j] /= n;
+
+    const centered = embeddings.map(row => {
+        const out = new Float64Array(d);
+        for (let j = 0; j < d; j++) out[j] = row[j] - mean[j];
+        return out;
+    });
+
+    function powerIteration(data, numIter = 50) {
+        let v = new Float64Array(d);
+        for (let j = 0; j < d; j++) v[j] = Math.random() - 0.5;
+        let norm = Math.sqrt(v.reduce((s, x) => s + x * x, 0));
+        for (let j = 0; j < d; j++) v[j] /= norm;
+
+        for (let iter = 0; iter < numIter; iter++) {
+            const xv = new Float64Array(n);
+            for (let i = 0; i < n; i++) {
+                let dot = 0;
+                for (let j = 0; j < d; j++) dot += data[i][j] * v[j];
+                xv[i] = dot;
+            }
+            const w = new Float64Array(d);
+            for (let i = 0; i < n; i++) {
+                for (let j = 0; j < d; j++) w[j] += data[i][j] * xv[i];
+            }
+            norm = Math.sqrt(w.reduce((s, x) => s + x * x, 0));
+            if (norm < 1e-10) break;
+            for (let j = 0; j < d; j++) v[j] = w[j] / norm;
+        }
+        return v;
+    }
+
+    const pc1 = powerIteration(centered);
+    const proj1 = centered.map(row => {
+        let dot = 0;
+        for (let j = 0; j < d; j++) dot += row[j] * pc1[j];
+        return dot;
+    });
+
+    const deflated = centered.map((row, i) => {
+        const out = new Float64Array(d);
+        for (let j = 0; j < d; j++) out[j] = row[j] - proj1[i] * pc1[j];
+        return out;
+    });
+
+    const pc2 = powerIteration(deflated);
+    const proj2 = centered.map(row => {
+        let dot = 0;
+        for (let j = 0; j < d; j++) dot += row[j] * pc2[j];
+        return dot;
+    });
+
+    return proj1.map((x, i) => [x, proj2[i]]);
+}
+
+function renderPCAChart(container, history) {
+    const { embeddingsForViz, labelsForViz, classNames } = history;
+    if (!embeddingsForViz || embeddingsForViz.length < 3) return;
+
+    const coords = computePCA2D(embeddingsForViz);
+    const COLORS = ['#059669', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+
+    const traces = classNames.map((name, ci) => {
+        const indices = labelsForViz.map((l, i) => l === ci ? i : -1).filter(i => i >= 0);
+        return {
+            x: indices.map(i => coords[i][0]),
+            y: indices.map(i => coords[i][1]),
+            mode: 'markers',
+            name,
+            marker: {
+                size: 10,
+                color: COLORS[ci % COLORS.length],
+                opacity: 0.8,
+                line: { width: 1, color: '#fff' }
+            },
+            type: 'scatter'
+        };
+    });
+
+    renderPlot('ic-pca-chart', traces, {
+        title: '特徴空間 (PCA 2次元射影)',
+        xaxis: { title: '第1主成分 (PC1)', zeroline: true },
+        yaxis: { title: '第2主成分 (PC2)', zeroline: true },
+        height: 400,
+        legend: { x: 0.01, y: 0.99 },
+        hovermode: 'closest'
+    });
+
+    container.querySelector('#ic-pca-section').style.display = '';
+}
+
+function renderConfidenceAnalysis(container, history) {
+    const { classNames, labelsForViz, allProbabilities, allThumbnails } = history;
+    if (!allProbabilities || !allThumbnails) return;
+
+    const contentEl = container.querySelector('#ic-confidence-content');
+    let html = '';
+
+    classNames.forEach((className, ci) => {
+        const samples = labelsForViz
+            .map((label, idx) => ({ idx, label, probs: allProbabilities[idx] }))
+            .filter(s => s.label === ci);
+
+        if (samples.length === 0) return;
+
+        const withConfidence = samples.map(s => ({
+            ...s,
+            correctProb: s.probs[ci],
+            predictedClass: s.probs.indexOf(Math.max(...s.probs)),
+            isCorrect: s.probs.indexOf(Math.max(...s.probs)) === ci
+        }));
+
+        const correct = withConfidence.filter(s => s.isCorrect).sort((a, b) => b.correctProb - a.correctProb);
+        const incorrect = withConfidence.filter(s => !s.isCorrect).sort((a, b) => a.correctProb - b.correctProb);
+
+        html += `<div style="margin-bottom: 1.5rem; padding: 1rem; background: var(--background); border-radius: 0.5rem; border: 1px solid var(--border-color);">`;
+        html += `<h5 style="font-size: 0.9rem; margin-bottom: 0.75rem; color: var(--text-primary);">
+                    <i class="fas fa-tag" style="color: ${THEME_COLOR};"></i> ${className}
+                    <span style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 0.5rem;">
+                        (正解率: ${correct.length}/${samples.length} = ${formatNumber(correct.length / samples.length, 2)})
+                    </span>
+                 </h5>`;
+
+        if (correct.length > 0) {
+            const top = correct.slice(0, 3);
+            html += `<div style="margin-bottom: 0.75rem;">
+                <span style="font-size: 0.8rem; color: #059669; font-weight: 600;">
+                    <i class="fas fa-check-circle"></i> 最も自信あり
+                </span>
+                <div style="display: flex; gap: 0.5rem; margin-top: 0.4rem; flex-wrap: wrap;">`;
+            top.forEach(s => {
+                html += `<div style="text-align: center;">
+                    <img src="${allThumbnails[s.idx]}" style="width: 56px; height: 56px; object-fit: cover; border-radius: 4px; border: 2px solid #059669;">
+                    <div style="font-size: 0.7rem; color: var(--text-secondary);">${formatNumber(s.correctProb * 100, 1)}%</div>
+                </div>`;
+            });
+            html += `</div></div>`;
+
+            if (correct.length > 1) {
+                const bottom = correct.slice(-Math.min(2, correct.length - 1));
+                html += `<div style="margin-bottom: 0.75rem;">
+                    <span style="font-size: 0.8rem; color: #f59e0b; font-weight: 600;">
+                        <i class="fas fa-exclamation-triangle"></i> 判断に迷い（正解だが低信頼度）
+                    </span>
+                    <div style="display: flex; gap: 0.5rem; margin-top: 0.4rem; flex-wrap: wrap;">`;
+                bottom.forEach(s => {
+                    html += `<div style="text-align: center;">
+                        <img src="${allThumbnails[s.idx]}" style="width: 56px; height: 56px; object-fit: cover; border-radius: 4px; border: 2px solid #f59e0b;">
+                        <div style="font-size: 0.7rem; color: var(--text-secondary);">${formatNumber(s.correctProb * 100, 1)}%</div>
+                    </div>`;
+                });
+                html += `</div></div>`;
+            }
+        }
+
+        if (incorrect.length > 0) {
+            html += `<div>
+                <span style="font-size: 0.8rem; color: #ef4444; font-weight: 600;">
+                    <i class="fas fa-times-circle"></i> 誤分類 (${incorrect.length}件)
+                </span>
+                <div style="display: flex; gap: 0.5rem; margin-top: 0.4rem; flex-wrap: wrap;">`;
+            incorrect.slice(0, 4).forEach(s => {
+                const predictedName = classNames[s.predictedClass];
+                html += `<div style="text-align: center;">
+                    <img src="${allThumbnails[s.idx]}" style="width: 56px; height: 56px; object-fit: cover; border-radius: 4px; border: 2px solid #ef4444;">
+                    <div style="font-size: 0.65rem; color: #ef4444;">→ ${predictedName}</div>
+                    <div style="font-size: 0.65rem; color: var(--text-secondary);">${formatNumber(s.correctProb * 100, 1)}%</div>
+                </div>`;
+            });
+            html += `</div></div>`;
+        }
+
+        html += `</div>`;
+    });
+
+    contentEl.innerHTML = html;
+    container.querySelector('#ic-confidence-section').style.display = '';
+}
+
+async function computeOcclusionMap(mobileNetModel, classifier, imgElement, classIdx, patchSize = 56, stride = 28) {
+    const tfLib = getTf();
+    const canvas = document.createElement('canvas');
+    canvas.width = IMAGE_SIZE;
+    canvas.height = IMAGE_SIZE;
+    const ctx = canvas.getContext('2d');
+
+    ctx.drawImage(imgElement, 0, 0, IMAGE_SIZE, IMAGE_SIZE);
+    const baselineTensor = imageToTensor(canvas);
+    const baselineEmbed = mobileNetModel.infer(baselineTensor, true);
+    const baselineProb = classifier.predict(baselineEmbed).arraySync()[0][classIdx];
+    baselineTensor.dispose();
+    baselineEmbed.dispose();
+
+    const stepsX = Math.ceil((IMAGE_SIZE - patchSize) / stride) + 1;
+    const stepsY = Math.ceil((IMAGE_SIZE - patchSize) / stride) + 1;
+    const sensitivityMap = [];
+
+    for (let gy = 0; gy < stepsY; gy++) {
+        const row = [];
+        for (let gx = 0; gx < stepsX; gx++) {
+            const x = Math.min(gx * stride, IMAGE_SIZE - patchSize);
+            const y = Math.min(gy * stride, IMAGE_SIZE - patchSize);
+
+            ctx.drawImage(imgElement, 0, 0, IMAGE_SIZE, IMAGE_SIZE);
+            ctx.fillStyle = '#808080';
+            ctx.fillRect(x, y, patchSize, patchSize);
+
+            const occTensor = imageToTensor(canvas);
+            const occEmbed = mobileNetModel.infer(occTensor, true);
+            const occProb = classifier.predict(occEmbed).arraySync()[0][classIdx];
+            occTensor.dispose();
+            occEmbed.dispose();
+
+            row.push(baselineProb - occProb);
+        }
+        sensitivityMap.push(row);
+    }
+
+    return { sensitivityMap, baselineProb, stepsX, stepsY, patchSize, stride };
+}
+
+function renderOcclusionHeatmap(canvasId, imgElement, occResult) {
+    const { sensitivityMap, stepsY, stepsX, patchSize, stride } = occResult;
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    canvas.width = IMAGE_SIZE;
+    canvas.height = IMAGE_SIZE;
+    const ctx = canvas.getContext('2d');
+
+    ctx.drawImage(imgElement, 0, 0, IMAGE_SIZE, IMAGE_SIZE);
+
+    let maxAbs = 0;
+    for (const row of sensitivityMap) {
+        for (const v of row) {
+            if (Math.abs(v) > maxAbs) maxAbs = Math.abs(v);
+        }
+    }
+    if (maxAbs < 1e-6) maxAbs = 1;
+
+    const overlay = ctx.createImageData(IMAGE_SIZE, IMAGE_SIZE);
+
+    for (let gy = 0; gy < stepsY; gy++) {
+        for (let gx = 0; gx < stepsX; gx++) {
+            const val = sensitivityMap[gy][gx] / maxAbs;
+            const x0 = Math.min(gx * stride, IMAGE_SIZE - patchSize);
+            const y0 = Math.min(gy * stride, IMAGE_SIZE - patchSize);
+
+            for (let py = y0; py < y0 + patchSize && py < IMAGE_SIZE; py++) {
+                for (let px = x0; px < x0 + patchSize && px < IMAGE_SIZE; px++) {
+                    const idx = (py * IMAGE_SIZE + px) * 4;
+                    const existing = overlay.data[idx + 3];
+                    if (existing > 0) {
+                        const oldR = overlay.data[idx];
+                        const oldG = overlay.data[idx + 1];
+                        const oldB = overlay.data[idx + 2];
+                        let r, g, b;
+                        if (val > 0) { r = 239; g = 68; b = 68; }
+                        else { r = 59; g = 130; b = 246; }
+                        overlay.data[idx] = Math.round((oldR + r) / 2);
+                        overlay.data[idx + 1] = Math.round((oldG + g) / 2);
+                        overlay.data[idx + 2] = Math.round((oldB + b) / 2);
+                        overlay.data[idx + 3] = Math.round(Math.max(existing, Math.abs(val) * 160));
+                    } else {
+                        if (val > 0) {
+                            overlay.data[idx] = 239;
+                            overlay.data[idx + 1] = 68;
+                            overlay.data[idx + 2] = 68;
+                        } else {
+                            overlay.data[idx] = 59;
+                            overlay.data[idx + 1] = 130;
+                            overlay.data[idx + 2] = 246;
+                        }
+                        overlay.data[idx + 3] = Math.round(Math.abs(val) * 160);
+                    }
+                }
+            }
+        }
+    }
+
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = IMAGE_SIZE;
+    tempCanvas.height = IMAGE_SIZE;
+    const tempCtx = tempCanvas.getContext('2d');
+    tempCtx.putImageData(overlay, 0, 0);
+    ctx.drawImage(tempCanvas, 0, 0);
+}
+
+async function renderOcclusionAnalysis(container, state, history) {
+    const { classNames, labelsForViz, allProbabilities, allThumbnails } = history;
+    if (!state.mobileNetModel || !state.classifier) return;
+
+    const contentEl = container.querySelector('#ic-occlusion-content');
+    let html = '<div style="display: flex; gap: 1.5rem; flex-wrap: wrap; justify-content: center;">';
+
+    const representativeImages = [];
+    classNames.forEach((className, ci) => {
+        const samples = labelsForViz
+            .map((label, idx) => ({ idx, label, prob: allProbabilities[idx][ci] }))
+            .filter(s => s.label === ci && allProbabilities[s.idx].indexOf(Math.max(...allProbabilities[s.idx])) === ci)
+            .sort((a, b) => b.prob - a.prob);
+
+        if (samples.length > 0) {
+            representativeImages.push({ classIdx: ci, className, sampleIdx: samples[0].idx, prob: samples[0].prob });
+        }
+    });
+
+    representativeImages.forEach((rep, idx) => {
+        html += `<div style="text-align: center; min-width: 240px;">
+            <p style="font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem;">${rep.className}</p>
+            <div style="display: flex; gap: 0.5rem; justify-content: center; align-items: start;">
+                <div>
+                    <p style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.25rem;">元画像</p>
+                    <img src="${allThumbnails[rep.sampleIdx]}" style="width: 112px; height: 112px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border-color);">
+                </div>
+                <div>
+                    <p style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.25rem;">注目領域</p>
+                    <canvas id="ic-occlusion-canvas-${idx}" width="112" height="112"
+                            style="width: 112px; height: 112px; border-radius: 6px; border: 1px solid var(--border-color);"></canvas>
+                </div>
+            </div>
+            <p id="ic-occlusion-status-${idx}" style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 0.3rem;">
+                <i class="fas fa-spinner fa-spin"></i> 分析中...
+            </p>
+        </div>`;
+    });
+
+    html += '</div>';
+    contentEl.innerHTML = html;
+    container.querySelector('#ic-occlusion-section').style.display = '';
+
+    for (let idx = 0; idx < representativeImages.length; idx++) {
+        const rep = representativeImages[idx];
+        const imgEl = state.classes[rep.classIdx].images[
+            labelsForViz.slice(0, rep.sampleIdx + 1).filter(l => l === rep.classIdx).length - 1
+        ];
+        if (!imgEl) continue;
+
+        try {
+            const occResult = await computeOcclusionMap(
+                state.mobileNetModel, state.classifier, imgEl, rep.classIdx
+            );
+            renderOcclusionHeatmap(`ic-occlusion-canvas-${idx}`, imgEl, occResult);
+            const statusEl = container.querySelector(`#ic-occlusion-status-${idx}`);
+            if (statusEl) {
+                statusEl.innerHTML = `ベースライン信頼度: ${formatNumber(occResult.baselineProb * 100, 1)}%`;
+            }
+        } catch (e) {
+            const statusEl = container.querySelector(`#ic-occlusion-status-${idx}`);
+            if (statusEl) statusEl.innerHTML = `<span style="color: #ef4444;">分析エラー</span>`;
+        }
+    }
+}
+
+async function renderInsights(container, state) {
+    const history = state.trainingHistory;
+    if (!history || !history.embeddingsForViz) return;
+
+    const loadingEl = container.querySelector('#ic-insights-loading');
+
+    try {
+        renderPCAChart(container, history);
+        renderConfidenceAnalysis(container, history);
+
+        if (loadingEl) loadingEl.style.display = 'none';
+
+        await renderOcclusionAnalysis(container, state, history);
+    } catch (e) {
+        if (loadingEl) {
+            loadingEl.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-circle"></i> 分析中にエラーが発生しました</p>`;
+        }
+    }
 }
 
 // ==========================================
