@@ -272,3 +272,23 @@
   - 画像分類予測: state getter関数でmobileNetModel/classifierが正しく参照される
   - コンソールエラー: 0
 - **判定**: 採用
+
+## Iteration 11 (2026-03-02)
+- **目標**: モデルJSON エクスポート + 予測モード実装
+- **変更**:
+  - js/utils.js: モデルシリアライゼーション関数追加 (downloadJSON, serializeModel, deserializeModel, makeModelFileName等 ~180行追加)
+  - js/analyses/regression.js: finalize_modelにJSONダウンロードボタン追加、_stateにencoders保存
+  - js/analyses/classification.js: finalize_modelにJSONダウンロードボタン追加、_stateにencoders保存
+  - js/analyses/prediction_mode.js: 新規作成 (~470行) - JSON読み込み→モデル復元→予測実行
+  - index.html: 予測モードカード追加 (data-requires="none", category-predict)
+  - css/style.css: category-predict テーマカラー (#6366f1) 追加
+- **シリアライゼーション対応モデル**: Linear, Ridge, Lasso, Tree, RF, KNN, GBM, LR, NB, SVM (全14モデル)
+- **保存内容**: モデルパラメータ + StandardScaler(means/stds) + LabelEncoder(classes) + encoders(カテゴリ変数エンコーダ)
+- **ファイル名形式**: `{データセット名}_{タスク}_{モデルバッジ}_{日付}.json`
+- **成功基準**: finalize後にJSONダウンロード可能、予測モードでJSON読み込み→予測実行
+- **結果**:
+  - Irisデータ: finalize → JSON download (iris_分類_KNN_20260302.json) 正常
+  - 住宅データ: finalize → JSON download → 予測モードで読み込み → 予測値表示 (8234.1345) 正常
+  - 予測モードカード表示、アップロードUI、モデル情報表示、特徴量入力フォーム、予測結果全て正常
+  - コンソールエラー: 0
+- **判定**: 採用
