@@ -813,3 +813,225 @@ export function createDownloadButton(id, label) {
         transition: all 0.3s ease;
     "><i class="fas fa-download"></i> ${label}</button>`;
 }
+
+// ==========================================
+// Model Serialization / Deserialization
+// ==========================================
+
+/**
+ * Download an object as a JSON file.
+ * @param {Object} data - The data to serialize
+ * @param {string} filename - Download filename
+ */
+export function downloadJSON(data, filename) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename.endsWith('.json') ? filename : `${filename}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+/**
+ * Recursively serialize a decision tree node to a plain object.
+ * @param {Object|null} node - TreeNode
+ * @returns {Object|null}
+ */
+function serializeTree(node) {
+    if (!node) return null;
+    if (node.value !== undefined && node.left === undefined) {
+        // Leaf node
+        return { value: node.value, classCounts: node.classCounts || undefined };
+    }
+    return {
+        featureIndex: node.featureIndex,
+        threshold: node.threshold,
+        left: serializeTree(node.left),
+        right: serializeTree(node.right),
+        value: node.value,
+        classCounts: node.classCounts || undefined
+    };
+}
+
+/**
+ * Serialize encoders Map to a JSON-safe array.
+ * @param {Map<number, Object>|null} encodersMap
+ * @returns {Array|null}
+ */
+function serializeEncoders(encodersMap) {
+    if (!encodersMap) return null;
+    const result = [];
+    for (const [colIndex, encoder] of encodersMap) {
+        result.push({
+            columnIndex: colIndex,
+            classes: encoder._classes ? [...encoder._classes] : encoder.classes ? [...encoder.classes] : []
+        });
+    }
+    return result;
+}
+
+/**
+ * Extract model-specific parameters for serialization.
+ * @param {Object} model - Trained model instance
+ * @param {string} modelType - Badge/type identifier
+ * @returns {Object}
+ */
+function serializeModelParams(model, modelType) {
+    const params = model.getParams ? model.getParams() : {};
+
+    switch (modelType) {
+        case 'Linear':
+        case 'Ridge':
+        case 'Lasso':
+            return {
+                coefficients: model.coefficients ? [...model.coefficients] : null,
+                intercept: model.intercept,
+                alpha: params.alpha,
+                nFeatures: model.nFeatures
+            };
+        case 'Tree':
+            return {
+                tree: serializeTree(model.tree),
+                maxDepth: model.maxDepth,
+                minSamplesSplit: model.minSamplesSplit,
+                minSamplesLeaf: model.minSamplesLeaf,
+                nFeatures: model.nFeatures,
+                nClasses: model.nClasses
+            };
+        case 'RF':
+            return {
+                trees: model.trees ? model.trees.map(t => ({
+                    tree: serializeTree(t.tree),
+                    featureIndices: t.featureIndices ? [...t.featureIndices] : null,
+                    maxDepth: t.maxDepth,
+                    nClasses: t.nClasses
+                })) : [],
+                nEstimators: model.nEstimators,
+                maxDepth: model.maxDepth,
+                maxFeatures: model.maxFeatures,
+                nFeatures: model.nFeatures,
+                nClasses: model.nClasses
+            };
+        case 'KNN':
+            return {
+                XTrain: model.XTrain ? model.XTrain.map(r => [...r]) : null,
+                yTrain: model.yTrain ? [...model.yTrain] : null,
+                nNeighbors: model.nNeighbors,
+                weights: model.weights,
+                nClasses: model.nClasses
+            };
+        case 'GBM':
+            return {
+                trees: model.trees ? model.trees.map(t => ({
+                    tree: serializeTree(t.tree),
+                    maxDepth: t.maxDepth
+                })) : [],
+                learningRate: model.learningRate,
+                nEstimators: model.nEstimators,
+                initialPrediction: model.initialPrediction,
+                nFeatures: model.nFeatures,
+                nClasses: model.nClasses,
+                classPriors: model.classPriors ? [...model.classPriors] : undefined
+            };
+        case 'LR':
+            return {
+                weights: model.weights ? model.weights.map(w => ({
+                    w: [...w.w],
+                    b: w.b
+                })) : null,
+                classes: model.classes ? [...model.classes] : null,
+                maxIter: model.maxIter,
+                nClasses: model.nClasses
+            };
+        case 'NB':
+            return {
+                classPriors: model.classPriors ? [...model.classPriors] : null,
+                means: model.means ? model.means.map(r => [...r]) : null,
+                variances: model.variances ? model.variances.map(r => [...r]) : null,
+                classes: model.classes ? [...model.classes] : null,
+                nClasses: model.nClasses
+            };
+        case 'SVM':
+            return {
+                weights: model.weights ? model.weights.map(w => ({
+                    w: [...w.w],
+                    b: w.b
+                })) : null,
+                classes: model.classes ? [...model.classes] : null,
+                C: model.C,
+                maxIter: model.maxIter,
+                nClasses: model.nClasses
+            };
+        default:
+            return params;
+    }
+}
+
+/**
+ * Serialize a trained model and its preprocessing pipeline to a JSON-safe object.
+ * @param {Object} modelObj - { model, cls, name, badge, ... }
+ * @param {Object} metadata - { featureNames, scaler, encoders, labelEncoder, targetCol, fileName, taskType, classLabels }
+ * @returns {Object} Serializable model export object
+ */
+export function serializeModel(modelObj, metadata) {
+    const now = new Date();
+    return {
+        version: '1.0',
+        appName: 'easyDataScience',
+        exportDate: now.toISOString(),
+        taskType: metadata.taskType,
+        targetCol: metadata.targetCol,
+        featureNames: [...metadata.featureNames],
+        classLabels: metadata.classLabels ? [...metadata.classLabels] : null,
+        modelInfo: {
+            name: modelObj.name,
+            badge: modelObj.badge,
+            params: serializeModelParams(modelObj.model, modelObj.badge)
+        },
+        preprocessing: {
+            scaler: metadata.scaler ? {
+                type: metadata.scaler.constructor.name,
+                means: metadata.scaler.means ? [...metadata.scaler.means] : null,
+                stds: metadata.scaler.stds ? [...metadata.scaler.stds] : null,
+                mins: metadata.scaler.mins ? [...metadata.scaler.mins] : null,
+                maxs: metadata.scaler.maxs ? [...metadata.scaler.maxs] : null
+            } : null,
+            encoders: serializeEncoders(metadata.encoders),
+            labelEncoder: metadata.labelEncoder ? {
+                classes: [...metadata.labelEncoder._classes]
+            } : null
+        },
+        datasetName: metadata.fileName || 'unknown'
+    };
+}
+
+/**
+ * Validate and parse a model JSON file.
+ * @param {string|Object} jsonData - Raw JSON string or parsed object
+ * @returns {Object} Parsed and validated model data
+ * @throws {Error} If validation fails
+ */
+export function deserializeModel(jsonData) {
+    const data = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
+    if (!data.version) throw new Error('無効なモデルファイル: バージョン情報がありません');
+    if (data.appName !== 'easyDataScience') throw new Error('無効なモデルファイル: easyDataScienceで作成されたファイルではありません');
+    if (!data.modelInfo || !data.featureNames) throw new Error('無効なモデルファイル: モデル情報が不足しています');
+    return data;
+}
+
+/**
+ * Generate a descriptive filename for model export.
+ * @param {string} datasetName - Original dataset name
+ * @param {string} modelBadge - Model badge (e.g., 'RF', 'Linear')
+ * @param {string} taskType - 'regression' or 'classification'
+ * @returns {string}
+ */
+export function makeModelFileName(datasetName, modelBadge, taskType) {
+    const base = datasetName.replace(/\.\w+$/, '').replace(/[^\w\u3000-\u9fff]/g, '_');
+    const task = taskType === 'regression' ? '回帰' : '分類';
+    const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    return `${base}_${task}_${modelBadge}_${date}.json`;
+}

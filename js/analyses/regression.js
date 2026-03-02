@@ -2,7 +2,7 @@
 // 回帰モデル比較 (AutoML) Module
 // PyCaret-style: setup → compare_models (CV) → tune_model → predict_model
 // ==========================================
-import { createSelect, createStepIndicator, formatNumber, renderPlot, renderActualVsPredicted, renderResidualPlot, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton, makeExportFileName, renderDataPreview, renderSummaryStatistics } from '../utils.js';
+import { createSelect, createStepIndicator, formatNumber, renderPlot, renderActualVsPredicted, renderResidualPlot, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton, makeExportFileName, renderDataPreview, renderSummaryStatistics, downloadJSON, serializeModel, makeModelFileName } from '../utils.js';
 import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
 import { prepareFeatures } from '../ml/preprocessing.js';
 import { trainTestSplit, crossValidate, gridSearch, permutationImportance, learningCurve } from '../ml/model_selection.js';
@@ -180,7 +180,7 @@ async function runComparison(container, data, characteristics) {
         const { XTrain, XTest, yTrain, yTest } = trainTestSplit(X, y, { testSize, randomState: 42 });
 
         // Save state for tune/predict
-        _state = { XTrain, XTest, yTrain, yTest, featureNames, scaler, cvFolds, targetCol, fileName: characteristics.fileName || 'data' };
+        _state = { XTrain, XTest, yTrain, yTest, featureNames, scaler, encoders, cvFolds, targetCol, fileName: characteristics.fileName || 'data' };
 
         // Compute preprocessing info
         const missingCount = selectedFeatures.reduce((sum, col) => {
@@ -1403,8 +1403,21 @@ async function runFinalizeModel(container, result, featureNames) {
                         テストデータがなくなるため、テスト評価は行えませんが、CVスコアが参考になります。
                     </p>
                 </div>
+                ${createDownloadButton('dl-model-json', 'モデルをJSONダウンロード')}
             </div>
         `;
+
+        // Model download handler
+        const dlModelBtn = finalizeResults.querySelector('#dl-model-json');
+        if (dlModelBtn) {
+            dlModelBtn.addEventListener('click', () => {
+                const exportData = serializeModel(
+                    { model: finalModel, name: result.name, badge: result.badge },
+                    { featureNames: _state.featureNames, scaler: _state.scaler, encoders: _state.encoders, targetCol: _state.targetCol, fileName: _state.fileName, taskType: 'regression' }
+                );
+                downloadJSON(exportData, makeModelFileName(_state.fileName, result.badge, 'regression'));
+            });
+        }
 
     } catch (error) {
         finalizeResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 確定エラー: ${error.message}</p>`;
