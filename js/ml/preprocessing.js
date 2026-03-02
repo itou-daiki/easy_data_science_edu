@@ -103,6 +103,29 @@ function _validate2D(data, context) {
   }
 }
 
+/**
+ * Compute Pearson correlation coefficient between two numeric arrays.
+ * @param {number[]} a
+ * @param {number[]} b
+ * @returns {number} Correlation in [-1, 1], or 0 if undefined.
+ */
+function _pearsonCorrelation(a, b) {
+  const n = a.length;
+  if (n === 0) return 0;
+  const meanA = a.reduce((s, v) => s + v, 0) / n;
+  const meanB = b.reduce((s, v) => s + v, 0) / n;
+  let num = 0, denA = 0, denB = 0;
+  for (let i = 0; i < n; i++) {
+    const da = a[i] - meanA;
+    const db = b[i] - meanB;
+    num += da * db;
+    denA += da * da;
+    denB += db * db;
+  }
+  const den = Math.sqrt(denA * denB);
+  return den === 0 ? 0 : num / den;
+}
+
 // ---------------------------------------------------------------------------
 // StandardScaler
 // ---------------------------------------------------------------------------
@@ -540,7 +563,17 @@ export function encodeCategorials(data, columns) {
  * }}
  */
 export function prepareFeatures(rawData, targetCol, options = {}) {
-  const { imputeStrategy = 'mean', scale = true, selectedFeatures = null, task = 'regression' } = options;
+  const {
+    imputeStrategy = 'mean',
+    scale = true,
+    selectedFeatures = null,
+    task = 'regression',
+    removeOutliers = true,
+    removeMulticollinearity = true,
+    multicollinearityThreshold = 0.95,
+    transformFeatures = true,
+    skewnessThreshold = 2.0
+  } = options;
 
   // --- 0. Handle array-of-objects format (from CSV/XLSX parsing) ------------
   let headers, body;
@@ -613,9 +646,15 @@ export function prepareFeatures(rawData, targetCol, options = {}) {
     })
   );
 
+  // --- Preprocessing info tracking -------------------------------------------
+  const preprocessInfo = {
+    outlierRows: 0,
+    removedMulticollinear: [],
+    transformedFeatures: []
+  };
+
   // --- 5. Impute missing values for numeric columns -------------------------
   if (numericCols.length > 0) {
-    // Build a sub-matrix of numeric columns, impute, then write back
     const numericData = X.map((row) => numericCols.map((j) => row[j]));
     const imputer = new SimpleImputer({ strategy: imputeStrategy });
     const imputedNumeric = imputer.fitTransform(numericData);
@@ -629,10 +668,62 @@ export function prepareFeatures(rawData, targetCol, options = {}) {
     });
   }
 
+  // --- 5.5 Remove outliers (IQR method) ------------------------------------
+  if (removeOutliers && numericCols.length > 0) {
+    const keepMask = Array(X.length).fill(true);
+    for (const j of numericCols) {
+      const vals = X.map(row => row[j]).filter(v => v != null && !Number.isNaN(v));
+      if (vals.length < 10) continue; // skip columns with too few values
+      const sorted = [...vals].sort((a, b) => a - b);
+      const q1 = sorted[Math.floor(sorted.length * 0.25)];
+      const q3 = sorted[Math.floor(sorted.length * 0.75)];
+      const iqr = q3 - q1;
+      if (iqr === 0) continue;
+      const lower = q1 - 1.5 * iqr;
+      const upper = q3 + 1.5 * iqr;
+      for (let i = 0; i < X.length; i++) {
+        const v = X[i][j];
+        if (v != null && (v < lower || v > upper)) {
+          keepMask[i] = false;
+        }
+      }
+    }
+    const originalLen = X.length;
+    X = X.filter((_, i) => keepMask[i]);
+    y = y.filter((_, i) => keepMask[i]);
+    preprocessInfo.outlierRows = originalLen - X.length;
+  }
+
+  // --- 5.6 Feature transformation (log for skewed features) ----------------
+  if (transformFeatures && numericCols.length > 0) {
+    for (const j of numericCols) {
+      const vals = X.map(row => row[j]).filter(v => v != null && !Number.isNaN(v));
+      if (vals.length < 5) continue;
+      const n = vals.length;
+      const mu = vals.reduce((s, v) => s + v, 0) / n;
+      const m3 = vals.reduce((s, v) => s + Math.pow(v - mu, 3), 0) / n;
+      const m2 = vals.reduce((s, v) => s + Math.pow(v - mu, 2), 0) / n;
+      const stdDev = Math.sqrt(m2);
+      if (stdDev === 0) continue;
+      const skewness = m3 / Math.pow(stdDev, 3);
+      // Apply log1p for positively skewed features with all non-negative values
+      if (Math.abs(skewness) > skewnessThreshold) {
+        const minVal = Math.min(...vals);
+        if (minVal >= 0) {
+          X = X.map(row => {
+            const newRow = [...row];
+            newRow[j] = Math.log1p(newRow[j]);
+            return newRow;
+          });
+          preprocessInfo.transformedFeatures.push(featureNames[j]);
+        }
+      }
+    }
+  }
+
   // --- 6. Encode categorical columns ----------------------------------------
   let encoders = new Map();
   if (categoricalCols.length > 0) {
-    // Impute categorical missing values with mode before encoding
     const catData = X.map((row) => categoricalCols.map((j) => row[j]));
     for (let k = 0; k < categoricalCols.length; k++) {
       const colVals = _column(catData, k);
@@ -654,6 +745,39 @@ export function prepareFeatures(rawData, targetCol, options = {}) {
   // Ensure all values are numbers at this point
   X = X.map((row) => row.map((v) => (typeof v === 'number' ? v : Number(v))));
 
+  // --- 6.5 Remove multicollinear features ----------------------------------
+  if (removeMulticollinearity && X.length > 0 && X[0].length > 1) {
+    const nFeats = X[0].length;
+    const colsToRemove = new Set();
+    for (let a = 0; a < nFeats; a++) {
+      if (colsToRemove.has(a)) continue;
+      for (let b = a + 1; b < nFeats; b++) {
+        if (colsToRemove.has(b)) continue;
+        const colA = X.map(row => row[a]);
+        const colB = X.map(row => row[b]);
+        const corr = _pearsonCorrelation(colA, colB);
+        if (Math.abs(corr) > multicollinearityThreshold) {
+          colsToRemove.add(b);
+          preprocessInfo.removedMulticollinear.push(featureNames[b]);
+        }
+      }
+    }
+    if (colsToRemove.size > 0) {
+      const keepCols = Array.from({ length: nFeats }, (_, i) => i).filter(i => !colsToRemove.has(i));
+      X = X.map(row => keepCols.map(i => row[i]));
+      const newFeatureNames = keepCols.map(i => featureNames[i]);
+      // Update encoders keys
+      const newEncoders = new Map();
+      for (const [oldIdx, enc] of encoders) {
+        const newIdx = keepCols.indexOf(oldIdx);
+        if (newIdx !== -1) newEncoders.set(newIdx, enc);
+      }
+      featureNames.length = 0;
+      featureNames.push(...newFeatureNames);
+      encoders = newEncoders;
+    }
+  }
+
   // --- 7. Scale numeric features --------------------------------------------
   let scaler = null;
   if (scale) {
@@ -661,7 +785,7 @@ export function prepareFeatures(rawData, targetCol, options = {}) {
     X = scaler.fitTransform(X);
   }
 
-  return { X, y, featureNames, encoders, scaler, labelEncoder };
+  return { X, y, featureNames, encoders, scaler, labelEncoder, preprocessInfo };
 }
 
 /**

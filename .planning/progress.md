@@ -292,3 +292,21 @@
   - 予測モードカード表示、アップロードUI、モデル情報表示、特徴量入力フォーム、予測結果全て正常
   - コンソールエラー: 0
 - **判定**: 採用
+
+## Iteration 12 (2026-03-02)
+- **目標**: PyCaret風の自動前処理拡張
+- **変更**:
+  - js/ml/preprocessing.js: `_pearsonCorrelation`関数追加、`prepareFeatures`に外れ値除去(IQR法)・特徴量変換(log1p)・多重共線性除去(Pearson相関>0.95)・`preprocessInfo`追跡を追加
+  - js/analyses/regression.js: `#preprocess-summary`divを追加して前処理サマリーとスピナーを分離、前処理情報(外れ値・変換・多重共線性)をUIに表示
+  - js/analyses/classification.js: 同上
+- **追加された前処理ステップ**:
+  - Step 5.5: 外れ値除去 (IQR法、Q1-1.5*IQR ～ Q3+1.5*IQR、10値未満の列はスキップ)
+  - Step 5.6: 特徴量変換 (歪度|skewness|>2.0 かつ非負値の列にlog1p変換)
+  - Step 6.5: 多重共線性除去 (Pearson相関>0.95の後列を除去)
+- **バグ修正**: 比較結果表示時に`progress-area.innerHTML=''`で前処理サマリーが消える問題 → `#preprocess-summary`divに分離して永続化
+- **結果**:
+  - 分類(iris): 前処理サマリー表示あり、7モデル比較完了
+  - 回帰(housing): 前処理サマリー表示あり、7モデル比較完了
+  - 外れ値除去・特徴量変換・多重共線性・スケーリング・データ分割の全項目表示確認
+  - コンソールエラー: 0
+- **判定**: 採用

@@ -98,6 +98,7 @@ export function render(container, data, characteristics) {
         </div>
 
         <div id="compare-section" style="display: none;">
+            <div id="preprocess-summary"></div>
             <div id="progress-area"></div>
             <div id="comparison-results"></div>
         </div>
@@ -172,7 +173,7 @@ async function runComparison(container, data, characteristics) {
     await new Promise(r => setTimeout(r, 100));
 
     try {
-        const { X, y, featureNames, encoders, scaler } = prepareFeatures(data, targetCol, {
+        const { X, y, featureNames, encoders, scaler, preprocessInfo } = prepareFeatures(data, targetCol, {
             selectedFeatures,
             task: 'regression'
         });
@@ -188,9 +189,12 @@ async function runComparison(container, data, characteristics) {
         }, 0);
         const categoricalCount = encoders ? encoders.size : 0;
         const scalingApplied = scaler !== null;
+        const outlierRows = preprocessInfo?.outlierRows || 0;
+        const removedMulti = preprocessInfo?.removedMulticollinear || [];
+        const transformed = preprocessInfo?.transformedFeatures || [];
 
-        // Show preprocessing summary
-        progressArea.innerHTML = `
+        // Show preprocessing summary (in dedicated div so it persists after training)
+        container.querySelector('#preprocess-summary').innerHTML = `
             <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 1.25rem; margin-bottom: 1.5rem;">
                 <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; color: #166534;">
                     <i class="fas fa-magic" style="margin-right: 0.5rem;"></i>Step 2: 前処理 (自動完了)
@@ -214,6 +218,18 @@ async function runComparison(container, data, characteristics) {
                     </div>
                     <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
                         <i class="fas fa-check-circle"></i>
+                        <span>外れ値除去: ${outlierRows > 0 ? outlierRows + '行をIQR法で除去' : '外れ値なし'}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                        <i class="fas fa-check-circle"></i>
+                        <span>特徴量変換: ${transformed.length > 0 ? transformed.join(', ') + ' にlog変換' : '変換不要'}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                        <i class="fas fa-check-circle"></i>
+                        <span>多重共線性: ${removedMulti.length > 0 ? removedMulti.join(', ') + ' を除去' : '問題なし'}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                        <i class="fas fa-check-circle"></i>
                         <span>スケーリング: ${scalingApplied ? 'StandardScaler (平均0, 分散1)' : 'なし'}</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
@@ -222,6 +238,9 @@ async function runComparison(container, data, characteristics) {
                     </div>
                 </div>
             </div>
+        `;
+        // Show spinner in progress-area (cleared after training completes)
+        progressArea.innerHTML = `
             <div style="text-align: center; padding: 2rem;">
                 <i class="fas fa-spinner fa-spin fa-2x" style="color: #d97706;"></i>
                 <p style="margin-top: 1rem; font-weight: 600;">モデルを学習・比較しています...</p>
