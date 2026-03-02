@@ -252,6 +252,9 @@ export function render(container, _data, _characteristics) {
         <div class="step-indicator-wrapper">${createStepIndicator(STEPS, 0)}</div>
         <div id="ic-error-message"></div>
 
+        <!-- Data Preparation Summary (persists across steps) -->
+        <div id="ic-data-preparation-summary" style="display: none;"></div>
+
         <!-- Step 1: Data Preparation -->
         <div id="ic-step-setup" class="model-config">
             <h3><i class="fas fa-folder-open" style="color: ${THEME_COLOR};"></i> Step 1: 学習データの準備</h3>
@@ -385,8 +388,10 @@ export function render(container, _data, _characteristics) {
     `;
 
     // --- Initialize UI ---
+    const getState = () => state;
+    const setState = (newState) => { state = newState; };
     renderClassCards(container, state);
-    setupSetupEventListeners(container, state, (newState) => { state = newState; });
+    setupSetupEventListeners(container, getState, setState);
 
     // --- Setup: Add Class Button ---
     const addClassBtn = container.querySelector('#ic-add-class-btn');
@@ -397,7 +402,7 @@ export function render(container, _data, _characteristics) {
         ];
         state = updateState(state, { classes: newClasses });
         renderClassCards(container, state);
-        setupSetupEventListeners(container, state, (newState) => { state = newState; });
+        setupSetupEventListeners(container, getState, setState);
         updateDataSummary(container, state);
     });
 
@@ -406,6 +411,10 @@ export function render(container, _data, _characteristics) {
     startTrainingBtn.addEventListener('click', () => {
         state = updateState(state, { currentStep: 1 });
         renderStepIndicator(container, 1);
+
+        // Show persistent data preparation summary
+        renderDataPreparationSummary(container, state);
+
         container.querySelector('#ic-step-setup').style.display = 'none';
         container.querySelector('#ic-step-training').style.display = 'block';
     });
@@ -461,7 +470,7 @@ function renderClassCards(container, state) {
     classesContainer.innerHTML = state.classes.map((cls, i) => createClassCard(cls, i)).join('');
 }
 
-function setupSetupEventListeners(container, state, setState) {
+function setupSetupEventListeners(container, getState, setState) {
     // Drop zones
     container.querySelectorAll('.ic-drop-zone').forEach(zone => {
         const classIdx = parseInt(zone.dataset.class, 10);
@@ -486,10 +495,10 @@ function setupSetupEventListeners(container, state, setState) {
                 showError(container, '対応する画像形式（JPG, PNG, WEBP）のみアップロードできます。');
                 return;
             }
-            const newState = await addImagesToClass(state, classIdx, files);
+            const newState = await addImagesToClass(getState(), classIdx, files);
             setState(newState);
             renderClassCards(container, newState);
-            setupSetupEventListeners(container, newState, setState);
+            setupSetupEventListeners(container, () => getState(), setState);
             updateDataSummary(container, newState);
         });
 
@@ -503,10 +512,10 @@ function setupSetupEventListeners(container, state, setState) {
         fileInput.addEventListener('change', async (e) => {
             const files = Array.from(e.target.files).filter(isValidImageFile);
             if (files.length === 0) return;
-            const newState = await addImagesToClass(state, classIdx, files);
+            const newState = await addImagesToClass(getState(), classIdx, files);
             setState(newState);
             renderClassCards(container, newState);
-            setupSetupEventListeners(container, newState, setState);
+            setupSetupEventListeners(container, () => getState(), setState);
             updateDataSummary(container, newState);
         });
     });
@@ -517,18 +526,19 @@ function setupSetupEventListeners(container, state, setState) {
             e.stopPropagation();
             const classIdx = parseInt(btn.dataset.class, 10);
             const imageIdx = parseInt(btn.dataset.image, 10);
-            const cls = state.classes[classIdx];
+            const currentState = getState();
+            const cls = currentState.classes[classIdx];
             const newCls = {
                 ...cls,
                 files: cls.files.filter((_, i) => i !== imageIdx),
                 thumbnails: cls.thumbnails.filter((_, i) => i !== imageIdx),
                 images: cls.images.filter((_, i) => i !== imageIdx)
             };
-            const newClasses = state.classes.map((c, i) => i === classIdx ? newCls : c);
-            const newState = updateState(state, { classes: newClasses });
+            const newClasses = currentState.classes.map((c, i) => i === classIdx ? newCls : c);
+            const newState = updateState(currentState, { classes: newClasses });
             setState(newState);
             renderClassCards(container, newState);
-            setupSetupEventListeners(container, newState, setState);
+            setupSetupEventListeners(container, () => getState(), setState);
             updateDataSummary(container, newState);
         });
     });
@@ -537,27 +547,29 @@ function setupSetupEventListeners(container, state, setState) {
     container.querySelectorAll('.ic-remove-class').forEach(btn => {
         btn.addEventListener('click', () => {
             const classIdx = parseInt(btn.dataset.class, 10);
-            if (state.classes.length <= 2) {
+            const currentState = getState();
+            if (currentState.classes.length <= 2) {
                 showError(container, 'クラスは最低2つ必要です。');
                 return;
             }
-            const newClasses = state.classes.filter((_, i) => i !== classIdx);
-            const newState = updateState(state, { classes: newClasses });
+            const newClasses = currentState.classes.filter((_, i) => i !== classIdx);
+            const newState = updateState(currentState, { classes: newClasses });
             setState(newState);
             renderClassCards(container, newState);
-            setupSetupEventListeners(container, newState, setState);
+            setupSetupEventListeners(container, () => getState(), setState);
             updateDataSummary(container, newState);
         });
     });
 
-    // Class name inputs
+    // Class name inputs — use 'input' event for immediate updates
     container.querySelectorAll('.ic-class-name').forEach(input => {
-        input.addEventListener('change', () => {
+        input.addEventListener('input', () => {
             const classIdx = parseInt(input.dataset.class, 10);
-            const newClasses = state.classes.map((c, i) =>
+            const currentState = getState();
+            const newClasses = currentState.classes.map((c, i) =>
                 i === classIdx ? { ...c, name: input.value || `クラス ${classIdx + 1}` } : c
             );
-            const newState = updateState(state, { classes: newClasses });
+            const newState = updateState(currentState, { classes: newClasses });
             setState(newState);
         });
     });
@@ -618,6 +630,51 @@ function updateDataSummary(container, state) {
     } else {
         startBtn.style.opacity = '0.5';
     }
+}
+
+// ==========================================
+// Data Preparation Summary (persistent)
+// ==========================================
+
+function renderDataPreparationSummary(container, state) {
+    const summaryDiv = container.querySelector('#ic-data-preparation-summary');
+    const totalImages = state.classes.reduce((sum, c) => sum + c.files.length, 0);
+
+    const classCards = state.classes.map(cls => {
+        const thumbs = cls.thumbnails.slice(0, 6).map(thumb =>
+            `<img src="${thumb}" style="width: 36px; height: 36px; object-fit: cover;
+                  border-radius: 4px; border: 1px solid var(--border-color);">`
+        ).join('');
+        const extra = cls.thumbnails.length > 6
+            ? `<span style="font-size: 0.75rem; color: var(--text-secondary);">+${cls.thumbnails.length - 6}</span>`
+            : '';
+        return `
+            <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0;">
+                <span style="font-weight: 600; min-width: 80px; color: ${THEME_COLOR};">${cls.name}</span>
+                <div style="display: flex; gap: 3px; flex-wrap: wrap; align-items: center;">
+                    ${thumbs}${extra}
+                </div>
+                <span style="font-size: 0.8rem; color: var(--text-secondary); margin-left: auto;">${cls.files.length}枚</span>
+            </div>`;
+    }).join('');
+
+    summaryDiv.style.display = 'block';
+    summaryDiv.innerHTML = `
+        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px;
+                    padding: 1.25rem; margin-bottom: 1.5rem;">
+            <h3 style="margin: 0 0 0.75rem 0; font-size: 1.1rem; color: #166534;">
+                <i class="fas fa-check-circle" style="margin-right: 0.5rem;"></i>
+                Step 1: データ準備 (完了)
+            </h3>
+            <div style="display: flex; gap: 1.5rem; margin-bottom: 0.75rem; font-size: 0.9rem;">
+                <span><i class="fas fa-layer-group" style="color: ${THEME_COLOR}; margin-right: 0.3rem;"></i>
+                    <strong>${state.classes.length}</strong> クラス</span>
+                <span><i class="fas fa-images" style="color: ${THEME_COLOR}; margin-right: 0.3rem;"></i>
+                    合計 <strong>${totalImages}</strong> 枚</span>
+            </div>
+            ${classCards}
+        </div>
+    `;
 }
 
 // ==========================================
