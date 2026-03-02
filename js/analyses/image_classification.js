@@ -124,7 +124,8 @@ function createInitialState() {
         classifier: null,
         trainingHistory: null,
         isTraining: false,
-        currentStep: 0
+        currentStep: 0,
+        highestStep: 0
     });
 }
 
@@ -136,10 +137,38 @@ function updateState(state, updates) {
 // UI Helpers
 // ==========================================
 
-function renderStepIndicator(container, activeIndex) {
+function renderStepIndicator(container, activeIndex, highestStep = 0) {
     const el = container.querySelector('.step-indicator-wrapper');
-    if (el) {
-        el.innerHTML = createStepIndicator(STEPS, activeIndex);
+    if (!el) return;
+    el.innerHTML = createStepIndicator(STEPS, activeIndex);
+    el.querySelectorAll('.step').forEach((stepEl, i) => {
+        if (i <= highestStep && i !== activeIndex) {
+            stepEl.style.cursor = 'pointer';
+            stepEl.dataset.stepIndex = i;
+            stepEl.classList.add('ic-clickable-step');
+            stepEl.addEventListener('mouseenter', () => { stepEl.style.opacity = '0.7'; });
+            stepEl.addEventListener('mouseleave', () => { stepEl.style.opacity = '1'; });
+        }
+    });
+}
+
+function showStep(container, stepIndex, highestStep) {
+    const stepIds = ['#ic-step-setup', '#ic-step-training', '#ic-step-evaluate', '#ic-step-predict'];
+    stepIds.forEach((id, i) => {
+        const el = container.querySelector(id);
+        if (el) el.style.display = i === stepIndex ? '' : 'none';
+    });
+    const summaryDiv = container.querySelector('#ic-data-preparation-summary');
+    if (summaryDiv) {
+        summaryDiv.style.display = (stepIndex > 0 && summaryDiv.innerHTML.trim()) ? 'block' : 'none';
+    }
+    renderStepIndicator(container, stepIndex, highestStep);
+    if (stepIndex === 1) {
+        const runBtn = container.querySelector('#ic-run-training-btn');
+        if (runBtn) {
+            runBtn.disabled = false;
+            runBtn.innerHTML = '<i class="fas fa-cogs"></i> 学習を実行';
+        }
     }
 }
 
@@ -280,6 +309,11 @@ export function render(container, _data, _characteristics) {
         <!-- Step 2: Training -->
         <div id="ic-step-training" style="display: none;">
             <div class="model-config">
+                <button class="ic-back-btn" data-target-step="0"
+                        style="background: none; border: none; color: var(--text-secondary);
+                               font-size: 0.85rem; cursor: pointer; padding: 0.25rem 0; margin-bottom: 0.75rem;">
+                    <i class="fas fa-arrow-left" style="margin-right: 0.3rem;"></i>データ準備に戻る
+                </button>
                 <h3><i class="fas fa-brain" style="color: ${THEME_COLOR};"></i> Step 2: モデル学習</h3>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
                     <div>
@@ -330,6 +364,11 @@ export function render(container, _data, _characteristics) {
         <!-- Step 3: Evaluation -->
         <div id="ic-step-evaluate" style="display: none;">
             <div class="model-config">
+                <button class="ic-back-btn" data-target-step="1"
+                        style="background: none; border: none; color: var(--text-secondary);
+                               font-size: 0.85rem; cursor: pointer; padding: 0.25rem 0; margin-bottom: 0.75rem;">
+                    <i class="fas fa-arrow-left" style="margin-right: 0.3rem;"></i>学習設定に戻る
+                </button>
                 <h3><i class="fas fa-chart-bar" style="color: ${THEME_COLOR};"></i> Step 3: 評価結果</h3>
                 <div class="metrics-grid" id="ic-metrics-grid"></div>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1.5rem;">
@@ -368,6 +407,11 @@ export function render(container, _data, _characteristics) {
         <!-- Step 4: Prediction -->
         <div id="ic-step-predict" style="display: none;">
             <div class="model-config">
+                <button class="ic-back-btn" data-target-step="2"
+                        style="background: none; border: none; color: var(--text-secondary);
+                               font-size: 0.85rem; cursor: pointer; padding: 0.25rem 0; margin-bottom: 0.75rem;">
+                    <i class="fas fa-arrow-left" style="margin-right: 0.3rem;"></i>評価結果に戻る
+                </button>
                 <h3><i class="fas fa-magic" style="color: ${THEME_COLOR};"></i> Step 4: 新しい画像を分類</h3>
                 <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 1rem;">
                     分類したい画像をアップロードしてください。学習済みモデルで予測を行います。
@@ -406,17 +450,41 @@ export function render(container, _data, _characteristics) {
         updateDataSummary(container, state);
     });
 
+    // --- Step Navigation Helpers ---
+    let predictionListenersAttached = false;
+
+    function handleStepChange(targetStep) {
+        if (state.isTraining) return;
+        state = updateState(state, { currentStep: targetStep });
+        showStep(container, targetStep, state.highestStep);
+        attachStepClickHandlers();
+        if (targetStep === 3 && !predictionListenersAttached && state.classifier) {
+            setupPredictionListeners(container, getState);
+            predictionListenersAttached = true;
+        }
+    }
+
+    function attachStepClickHandlers() {
+        container.querySelectorAll('.ic-clickable-step').forEach(stepEl => {
+            stepEl.addEventListener('click', () => {
+                handleStepChange(parseInt(stepEl.dataset.stepIndex, 10));
+            });
+        });
+    }
+
+    // Back buttons (static elements, set up once)
+    container.querySelectorAll('.ic-back-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            handleStepChange(parseInt(btn.dataset.targetStep, 10));
+        });
+    });
+
     // --- Setup: Start Training Button ---
     const startTrainingBtn = container.querySelector('#ic-start-training-btn');
     startTrainingBtn.addEventListener('click', () => {
-        state = updateState(state, { currentStep: 1 });
-        renderStepIndicator(container, 1);
-
-        // Show persistent data preparation summary
+        state = updateState(state, { highestStep: Math.max(state.highestStep, 1) });
         renderDataPreparationSummary(container, state);
-
-        container.querySelector('#ic-step-setup').style.display = 'none';
-        container.querySelector('#ic-step-training').style.display = 'block';
+        handleStepChange(1);
     });
 
     // --- Training: Run Training Button ---
@@ -434,11 +502,11 @@ export function render(container, _data, _characteristics) {
                 classifier: result.classifier,
                 trainingHistory: result.history,
                 isTraining: false,
-                currentStep: 2
+                currentStep: 2,
+                highestStep: Math.max(state.highestStep, 2)
             });
-            renderStepIndicator(container, 2);
-            container.querySelector('#ic-step-training').style.display = 'none';
-            container.querySelector('#ic-step-evaluate').style.display = 'block';
+            showStep(container, 2, state.highestStep);
+            attachStepClickHandlers();
             renderEvaluation(container, state);
         } catch (error) {
             console.error('Training error:', error);
@@ -452,12 +520,8 @@ export function render(container, _data, _characteristics) {
     // --- Evaluation: Go to Predict ---
     const goPredictBtn = container.querySelector('#ic-go-predict-btn');
     goPredictBtn.addEventListener('click', () => {
-        state = updateState(state, { currentStep: 3 });
-        renderStepIndicator(container, 3);
-        container.querySelector('#ic-step-evaluate').style.display = 'none';
-        container.querySelector('#ic-step-predict').style.display = 'block';
-        // Setup prediction listeners with current state (after training)
-        setupPredictionListeners(container, () => state);
+        state = updateState(state, { highestStep: Math.max(state.highestStep, 3) });
+        handleStepChange(3);
     });
 }
 
@@ -495,7 +559,7 @@ function setupSetupEventListeners(container, getState, setState) {
                 showError(container, '対応する画像形式（JPG, PNG, WEBP）のみアップロードできます。');
                 return;
             }
-            const newState = await addImagesToClass(getState(), classIdx, files);
+            const newState = await addImagesToClass(getState, classIdx, files);
             setState(newState);
             renderClassCards(container, newState);
             setupSetupEventListeners(container, () => getState(), setState);
@@ -512,7 +576,7 @@ function setupSetupEventListeners(container, getState, setState) {
         fileInput.addEventListener('change', async (e) => {
             const files = Array.from(e.target.files).filter(isValidImageFile);
             if (files.length === 0) return;
-            const newState = await addImagesToClass(getState(), classIdx, files);
+            const newState = await addImagesToClass(getState, classIdx, files);
             setState(newState);
             renderClassCards(container, newState);
             setupSetupEventListeners(container, () => getState(), setState);
@@ -575,18 +639,21 @@ function setupSetupEventListeners(container, getState, setState) {
     });
 }
 
-async function addImagesToClass(state, classIdx, files) {
-    const cls = state.classes[classIdx];
+async function addImagesToClass(getState, classIdx, files) {
+    // Perform async I/O first
     const newThumbnails = await Promise.all(files.map(f => createThumbnail(f)));
     const newImages = await Promise.all(files.map(f => loadImageFromFile(f)));
+    // Re-read state AFTER async work to avoid losing concurrent updates
+    const freshState = getState();
+    const cls = freshState.classes[classIdx];
     const updatedClass = {
         ...cls,
         files: [...cls.files, ...files],
         thumbnails: [...cls.thumbnails, ...newThumbnails],
         images: [...cls.images, ...newImages]
     };
-    const newClasses = state.classes.map((c, i) => i === classIdx ? updatedClass : c);
-    return updateState(state, { classes: newClasses });
+    const newClasses = freshState.classes.map((c, i) => i === classIdx ? updatedClass : c);
+    return updateState(freshState, { classes: newClasses });
 }
 
 function updateDataSummary(container, state) {
