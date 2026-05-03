@@ -2,6 +2,7 @@
 // easyDataScience - Main Entry Point
 // ==========================================
 import { showError, showLoadingMessage, hideLoadingMessage, toggleCollapsible, renderDataPreview, renderSummaryStatistics } from './utils.js';
+import { setupAIAssistSettingsUI, clearAIAssistPanelContext } from './ai_assistant.js';
 
 // ==========================================
 // Global Variables
@@ -20,6 +21,15 @@ const fileInput = document.getElementById('main-data-file');
 const fileInfo = document.getElementById('main-file-info');
 const demoBtn = document.getElementById('load-demo-btn');
 const featureGrid = document.querySelector('.feature-grid');
+const aiSettingsBtn = document.getElementById('ai-settings-btn');
+const aiSettingsModal = document.getElementById('ai-settings-modal');
+const closeAISettingsModal = document.getElementById('close-ai-settings-modal');
+const geminiApiKeyInput = document.getElementById('gemini-api-key-input');
+const geminiModelInput = document.getElementById('gemini-model-input');
+const saveAISettingsBtn = document.getElementById('save-ai-settings-btn');
+const clearAISettingsBtn = document.getElementById('clear-ai-settings-btn');
+const aiSettingsStatus = document.getElementById('ai-settings-status');
+const aiStatusBadge = document.getElementById('ai-status-badge');
 
 // ==========================================
 // Initialization
@@ -34,6 +44,18 @@ document.addEventListener('DOMContentLoaded', () => {
 // Event Listeners
 // ==========================================
 function setupEventListeners() {
+    setupAIAssistSettingsUI({
+        button: aiSettingsBtn,
+        modal: aiSettingsModal,
+        closeButton: closeAISettingsModal,
+        apiKeyInput: geminiApiKeyInput,
+        modelInput: geminiModelInput,
+        status: aiSettingsStatus,
+        saveButton: saveAISettingsBtn,
+        clearButton: clearAISettingsBtn,
+        badge: aiStatusBadge
+    });
+
     uploadBtn.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', (event) => {
         const file = event.target.files[0];
@@ -302,6 +324,7 @@ function disableCard(card) {
 }
 
 async function showAnalysisView(analysisType) {
+    clearAIAssistPanelContext();
     document.getElementById('navigation-section').style.display = 'none';
     document.getElementById('upload-section-main').style.display = 'none';
 
@@ -326,6 +349,7 @@ async function showAnalysisView(analysisType) {
 }
 
 window.backToHome = () => {
+    clearAIAssistPanelContext();
     document.getElementById('analysis-header').style.display = 'none';
     document.getElementById('analysis-area').style.display = 'none';
     document.getElementById('navigation-section').style.display = 'block';

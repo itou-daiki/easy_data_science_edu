@@ -2,6 +2,7 @@
 // 探索的データ分析 (EDA) Module
 // ==========================================
 import { renderPlot, createSelect, formatNumber } from '../utils.js';
+import { buildAnalysisContext, renderAIAssistPanel } from '../ai_assistant.js';
 
 export function render(container, data, characteristics) {
     const numCols = characteristics.numericColumns;
@@ -65,6 +66,34 @@ export function render(container, data, characteristics) {
         distSelect.value = numCols[0];
         renderDistribution(data, numCols[0]);
     }
+
+    renderAIAssistPanel({
+        context: buildAnalysisContext({
+            data,
+            characteristics,
+            method: '探索的データ分析 (EDA)',
+            resultSummary: createEDAResultSummary(data, characteristics)
+        })
+    });
+}
+
+function createEDAResultSummary(data, chars) {
+    const cols = chars.allColumns || Object.keys(data[0] || {});
+    const totalCells = data.length * cols.length;
+    const missingCount = cols.reduce((sum, col) => {
+        return sum + data.filter(row => row[col] == null || row[col] === '').length;
+    }, 0);
+
+    return {
+        sampleCount: data.length,
+        variableCount: cols.length,
+        numericVariableCount: chars.numericColumns.length,
+        categoricalVariableCount: chars.categoricalColumns.length,
+        textVariableCount: chars.textColumns.length,
+        missingCells: missingCount,
+        missingRate: totalCells > 0 ? Number((missingCount / totalCells * 100).toFixed(2)) : 0,
+        duplicateRows: countDuplicates(data)
+    };
 }
 
 function renderOverview(data, chars) {

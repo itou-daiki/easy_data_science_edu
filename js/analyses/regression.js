@@ -3,6 +3,7 @@
 // PyCaret-style: setup → compare_models (CV) → tune_model → predict_model
 // ==========================================
 import { createSelect, createStepIndicator, formatNumber, renderPlot, renderActualVsPredicted, renderResidualPlot, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton, makeExportFileName, renderDataPreview, renderSummaryStatistics, downloadJSON, serializeModel, makeModelFileName } from '../utils.js';
+import { buildAnalysisContext, renderAIAssistPanel } from '../ai_assistant.js';
 import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
 import { prepareTrainTestFeatures } from '../ml/preprocessing.js';
 import { KFold, crossValidate, gridSearch, permutationImportance, learningCurve } from '../ml/model_selection.js';
@@ -189,7 +190,7 @@ async function runComparison(container, data, characteristics) {
         }
 
         // Save state for tune/predict
-        _state = { XTrain, XTest, yTrain, yTest, featureNames, scaler, encoders, preprocessor, cvFolds: effectiveCvFolds, targetCol, fileName: characteristics.fileName || 'data' };
+        _state = { XTrain, XTest, yTrain, yTest, featureNames, scaler, encoders, preprocessor, cvFolds: effectiveCvFolds, targetCol, fileName: characteristics.fileName || 'data', rawData: data, characteristics };
 
         // Compute preprocessing info
         const missingCount = selectedFeatures.reduce((sum, col) => {
@@ -605,6 +606,29 @@ function showModelDetail(container, result, yTest, featureNames) {
     // Predict button handler
     container.querySelector('#btn-predict').addEventListener('click', () => {
         runPredictModel(container, result, featureNames);
+    });
+
+    renderAIAssistPanel({
+        context: buildAnalysisContext({
+            data: _state.rawData,
+            characteristics: _state.characteristics,
+            method: `回帰モデル比較 (AutoML) - ${result.name}`,
+            resultSummary: {
+                target: _state.targetCol,
+                selectedModel: result.name,
+                cvFolds: _state.cvFolds,
+                trainRows: _state.XTrain?.length || 0,
+                testRows: _state.XTest?.length || 0,
+                featureCount: featureNames.length,
+                features: featureNames,
+                cvR2Mean: result.cvMean,
+                cvR2Std: result.cvStd,
+                testR2: result.r2,
+                adjustedR2: result.adjR2,
+                mae: result.mae,
+                rmse: result.rmse
+            }
+        })
     });
 
     evalSection.scrollIntoView({ behavior: 'smooth' });

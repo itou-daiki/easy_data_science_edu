@@ -3,6 +3,7 @@
 // PyCaret-style: setup → compare_models (CV) → tune_model → predict_model
 // ==========================================
 import { createSelect, createStepIndicator, formatNumber, renderPlot, renderConfusionMatrix, renderROCCurve, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton, makeExportFileName, renderDataPreview, renderSummaryStatistics, downloadJSON, serializeModel, makeModelFileName } from '../utils.js';
+import { buildAnalysisContext, renderAIAssistPanel } from '../ai_assistant.js';
 import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
 import { prepareTrainTestFeatures } from '../ml/preprocessing.js';
 import { StratifiedKFold, crossValidate, gridSearch, permutationImportance, learningCurve } from '../ml/model_selection.js';
@@ -215,7 +216,7 @@ async function runComparison(container, data, characteristics) {
         }
 
         // Save state for tune/predict
-        _state = { XTrain, XTest, yTrain, yTest, featureNames, scaler, encoders, labelEncoder, preprocessor, classes, classLabels, cvFolds: effectiveCvFolds, targetCol, fileName: characteristics.fileName || 'data' };
+        _state = { XTrain, XTest, yTrain, yTest, featureNames, scaler, encoders, labelEncoder, preprocessor, classes, classLabels, cvFolds: effectiveCvFolds, targetCol, fileName: characteristics.fileName || 'data', rawData: data, characteristics };
 
         // Compute preprocessing info
         const missingCount = selectedFeatures.reduce((sum, col) => {
@@ -663,6 +664,32 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
     // Predict button handler
     container.querySelector('#btn-predict').addEventListener('click', () => {
         runPredictModel(container, result, featureNames);
+    });
+
+    renderAIAssistPanel({
+        context: buildAnalysisContext({
+            data: _state.rawData,
+            characteristics: _state.characteristics,
+            method: `分類モデル比較 (AutoML) - ${result.name}`,
+            resultSummary: {
+                target: _state.targetCol,
+                selectedModel: result.name,
+                classes: classLabels,
+                cvFolds: _state.cvFolds,
+                trainRows: _state.XTrain?.length || 0,
+                testRows: _state.XTest?.length || 0,
+                featureCount: featureNames.length,
+                features: featureNames,
+                cvF1Mean: result.cvMean,
+                cvF1Std: result.cvStd,
+                accuracy: result.acc,
+                precision: result.prec,
+                recall: result.rec,
+                f1: result.f1,
+                auc: result.auc,
+                logLoss: result.ll
+            }
+        })
     });
 
     evalSection.scrollIntoView({ behavior: 'smooth' });

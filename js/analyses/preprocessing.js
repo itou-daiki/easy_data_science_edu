@@ -2,6 +2,7 @@
 // データ前処理 Module
 // ==========================================
 import { createSelect, formatNumber, renderPlot } from '../utils.js';
+import { buildAnalysisContext, renderAIAssistPanel } from '../ai_assistant.js';
 
 export function render(container, data, characteristics) {
     const numCols = characteristics.numericColumns;
@@ -61,6 +62,45 @@ export function render(container, data, characteristics) {
             renderOutlierDetection(data, numCols[0]);
         }
     }
+
+    renderAIAssistPanel({
+        context: buildAnalysisContext({
+            data,
+            characteristics,
+            method: 'データ前処理',
+            resultSummary: createPreprocessingResultSummary(data, characteristics)
+        })
+    });
+}
+
+function createPreprocessingResultSummary(data, chars) {
+    const allCols = chars.allColumns || Object.keys(data[0] || {});
+    const missingInfo = allCols.map(col => {
+        const missing = data.filter(row => row[col] == null || row[col] === '').length;
+        return { column: col, missing, missingRate: data.length > 0 ? Number((missing / data.length * 100).toFixed(2)) : 0 };
+    });
+    const totalMissing = missingInfo.reduce((sum, item) => sum + item.missing, 0);
+    const numericRanges = chars.numericColumns.map(col => {
+        const values = data.map(row => row[col]).filter(value => value != null && Number.isFinite(Number(value))).map(Number);
+        if (values.length === 0) return null;
+        return {
+            column: col,
+            min: Math.min(...values),
+            max: Math.max(...values),
+            range: Math.max(...values) - Math.min(...values)
+        };
+    }).filter(Boolean);
+    const ranges = numericRanges.map(item => item.range).filter(range => range > 0);
+    const needsScaling = ranges.length >= 2 ? Math.max(...ranges) / Math.min(...ranges) > 10 : false;
+
+    return {
+        missingCells: totalMissing,
+        missingColumns: missingInfo.filter(item => item.missing > 0).slice(0, 10),
+        numericColumns: chars.numericColumns.length,
+        categoricalColumns: chars.categoricalColumns.length,
+        scalingRecommendation: needsScaling ? '変数間のスケール差が大きいためスケーリング推奨' : 'スケール差は比較的小さい',
+        encodingTargets: chars.categoricalColumns.slice(0, 10)
+    };
 }
 
 function renderMissingTab(data, allCols) {

@@ -100,6 +100,37 @@
         </div>
     </div>
 
+    <!-- Gemini AI Settings Modal -->
+    <div id="ai-settings-modal" class="modal">
+        <div class="modal-content ai-settings-modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-magic"></i> 生成AI支援の設定</h3>
+                <span class="close-modal" id="close-ai-settings-modal">&times;</span>
+            </div>
+            <p class="ai-settings-description">
+                Gemini APIキーを入力すると、分析結果ページで生成AIによる解釈補助を利用できます。
+                APIキーはこのブラウザタブ内にのみ保持され、分析の先頭10件・要約統計量・主要指標だけを送信します。
+            </p>
+            <div class="ai-settings-form">
+                <label for="gemini-api-key-input">Gemini APIキー</label>
+                <input type="password" id="gemini-api-key-input" placeholder="AIza..." autocomplete="off">
+
+                <label for="gemini-model-input">使用モデル</label>
+                <input type="text" id="gemini-model-input" value="gemini-2.5-flash" autocomplete="off">
+
+                <div class="ai-settings-actions">
+                    <button type="button" id="save-ai-settings-btn" class="btn-analysis">
+                        <i class="fas fa-check"></i> 有効化
+                    </button>
+                    <button type="button" id="clear-ai-settings-btn" class="btn-demo">
+                        <i class="fas fa-ban"></i> 無効化
+                    </button>
+                </div>
+                <div id="ai-settings-status" class="ai-settings-status"></div>
+            </div>
+        </div>
+    </div>
+
     <script>
         window.addEventListener('error', function (event) {
             const loadingScreen = document.getElementById('loading-screen');
@@ -118,6 +149,13 @@
     <div id="main-app" style="display: none;">
         <!-- Hero Section -->
         <div class="hero-section">
+            <div class="hero-action-left">
+                <button type="button" id="ai-settings-btn" class="btn-demo ai-settings-button">
+                    <i class="fas fa-magic"></i>
+                    生成AI支援
+                    <span id="ai-status-badge" class="ai-status-badge">未設定</span>
+                </button>
+            </div>
             <div style="position: absolute; top: 1.5rem; right: 1.5rem; z-index: 10;">
                 <a href="manual.html" target="_blank" class="btn-demo" style="text-decoration: none; display: inline-flex; align-items: center; gap: 0.5rem; background: rgba(255, 255, 255, 0.2); color: white; border: 1px solid rgba(255, 255, 255, 0.4); padding: 0.5rem 1rem;">
                     <i class="fas fa-book-open"></i> 使い方マニュアル
