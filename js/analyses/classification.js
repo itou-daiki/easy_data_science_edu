@@ -4,8 +4,8 @@
 // ==========================================
 import { createSelect, createStepIndicator, formatNumber, renderPlot, renderConfusionMatrix, renderROCCurve, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton, makeExportFileName, renderDataPreview, renderSummaryStatistics, downloadJSON, serializeModel, makeModelFileName } from '../utils.js';
 import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
-import { prepareFeatures } from '../ml/preprocessing.js';
-import { trainTestSplit, crossValidate, gridSearch, permutationImportance, learningCurve } from '../ml/model_selection.js';
+import { prepareTrainTestFeatures } from '../ml/preprocessing.js';
+import { StratifiedKFold, crossValidate, gridSearch, permutationImportance, learningCurve } from '../ml/model_selection.js';
 import { accuracy, precisionScore, recallScore, f1Score, confusionMatrix, logLoss, rocAucScore } from '../ml/metrics.js';
 import { LogisticRegression } from '../ml/classification/logistic.js';
 import { DecisionTreeClassifier } from '../ml/classification/decision_tree.js';
@@ -195,18 +195,27 @@ async function runComparison(container, data, characteristics) {
     await new Promise(r => setTimeout(r, 100));
 
     try {
-        const { X, y, featureNames, labelEncoder, encoders, scaler, preprocessInfo } = prepareFeatures(data, targetCol, {
+        const {
+            XTrain, XTest, yTrain, yTest,
+            featureNames, labelEncoder, encoders, scaler, preprocessInfo, preprocessor
+        } = prepareTrainTestFeatures(data, targetCol, {
             selectedFeatures,
-            task: 'classification'
+            task: 'classification',
+            testSize,
+            randomState: 42
         });
 
-        const classes = [...new Set(y)].sort((a, b) => a - b);
+        const classes = [...new Set(yTrain)].sort((a, b) => a - b);
         const classLabels = labelEncoder ? classes.map(c => labelEncoder.inverseTransform([c])[0]) : classes.map(String);
 
-        const { XTrain, XTest, yTrain, yTest } = trainTestSplit(X, y, { testSize, randomState: 42 });
+        const minClassCount = Math.min(...classes.map(cls => yTrain.filter(v => v === cls).length));
+        const effectiveCvFolds = Math.min(cvFolds, minClassCount);
+        if (effectiveCvFolds < 2) {
+            throw new Error('分類の層化交差検証には、訓練データ内の各クラスが2件以上必要です。');
+        }
 
         // Save state for tune/predict
-        _state = { XTrain, XTest, yTrain, yTest, featureNames, scaler, encoders, labelEncoder, classes, classLabels, cvFolds, targetCol, fileName: characteristics.fileName || 'data' };
+        _state = { XTrain, XTest, yTrain, yTest, featureNames, scaler, encoders, labelEncoder, preprocessor, classes, classLabels, cvFolds: effectiveCvFolds, targetCol, fileName: characteristics.fileName || 'data' };
 
         // Compute preprocessing info
         const missingCount = selectedFeatures.reduce((sum, col) => {
@@ -294,7 +303,7 @@ async function runComparison(container, data, characteristics) {
                 const yProba = model.predictProba ? model.predictProba(XTest) : null;
 
                 // Cross-validation on training data
-                const cvScores = crossValidate(model, XTrain, yTrain, { cv: cvFolds, scoring: 'f1' });
+                const cvScores = crossValidate(model, XTrain, yTrain, { cv: _state.cvFolds, scoring: 'f1', stratified: true });
                 const cvMean = cvScores.reduce((a, b) => a + b, 0) / cvScores.length;
                 const cvStd = Math.sqrt(cvScores.reduce((a, v) => a + (v - cvMean) ** 2, 0) / cvScores.length);
 
@@ -309,8 +318,8 @@ async function runComparison(container, data, characteristics) {
                 let ll = null;
                 if (yProba && classes.length === 2) {
                     const positiveProba = yProba.map(p => p[1] || 0);
-                    auc = rocAucScore(yTest, positiveProba);
-                    ll = logLoss(yTest, positiveProba);
+                    auc = rocAucScore(yTest, positiveProba, classes[1]);
+                    ll = logLoss(yTest, yProba, classes);
                 }
 
                 results.push({
@@ -590,12 +599,7 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
                 各特徴量の値を入力して予測を実行します。
             </p>
             <div id="predict-inputs" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; margin: 1rem 0;">
-                ${featureNames.map(f => `
-                    <div>
-                        <label style="font-weight: 600; font-size: 0.85rem; display: block; margin-bottom: 0.25rem;">${f}</label>
-                        <input type="number" id="pred-${f}" class="form-select" step="any" placeholder="値を入力" style="width: 100%;">
-                    </div>
-                `).join('')}
+                ${featureNames.map((f, i) => renderPredictInput(f, i)).join('')}
             </div>
             <button id="btn-predict" class="btn-analysis" style="background: #2563eb; margin-top: 0.5rem;">
                 <i class="fas fa-play"></i> predict_model を実行
@@ -718,7 +722,7 @@ async function runCreateModel(container, featureNames, classes, classLabels) {
         const yPred = model.predict(_state.XTest);
         const yProba = model.predictProba ? model.predictProba(_state.XTest) : null;
 
-        const cvScores = crossValidate(model, _state.XTrain, _state.yTrain, { cv: _state.cvFolds, scoring: 'f1' });
+        const cvScores = crossValidate(model, _state.XTrain, _state.yTrain, { cv: _state.cvFolds, scoring: 'f1', stratified: true });
         const cvMean = cvScores.reduce((a, b) => a + b, 0) / cvScores.length;
 
         const acc = accuracy(_state.yTest, yPred);
@@ -791,7 +795,7 @@ async function runTuneModel(container, result, featureNames, classes, classLabel
             paramGrid,
             _state.XTrain,
             _state.yTrain,
-            { cv: _state.cvFolds, scoring: 'f1' }
+            { cv: _state.cvFolds, scoring: 'f1', stratified: true }
         );
 
         // Train best model on full training data and evaluate on test
@@ -803,7 +807,7 @@ async function runTuneModel(container, result, featureNames, classes, classLabel
         const tunedPrec = precisionScore(_state.yTest, yPredTuned);
         const tunedRec = recallScore(_state.yTest, yPredTuned);
 
-        const improved = tunedF1 > result.f1;
+        const improved = bestScore > result.cvMean;
 
         tuneResults.innerHTML = `
             <div style="background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1rem;">
@@ -864,10 +868,10 @@ async function runTuneModel(container, result, featureNames, classes, classLabel
 
                 ${improved
                     ? `<p style="color: #10b981; font-weight: 600; margin-top: 1rem;">
-                        <i class="fas fa-check-circle"></i> チューニングによりテスト性能が改善しました！チューニング済みモデルを使用します。
+                        <i class="fas fa-check-circle"></i> チューニングによりCV性能が改善しました。以降はチューニング済みモデルを使用します。
                       </p>`
                     : `<p style="color: #f59e0b; font-weight: 600; margin-top: 1rem;">
-                        <i class="fas fa-info-circle"></i> テスト性能は改善しませんでしたが、CV F1は参考になります。
+                        <i class="fas fa-info-circle"></i> CV F1が改善しなかったため、元のモデルを維持します。
                       </p>`
                 }
 
@@ -909,7 +913,7 @@ async function runTuneModel(container, result, featureNames, classes, classLabel
             result.yProba = tunedModel.predictProba ? tunedModel.predictProba(_state.XTest) : null;
             if (result.yProba && classes.length === 2) {
                 const positiveProba = result.yProba.map(p => p[1] || 0);
-                result.auc = rocAucScore(_state.yTest, positiveProba);
+                result.auc = rocAucScore(_state.yTest, positiveProba, classes[1]);
             }
         }
 
@@ -990,7 +994,7 @@ async function runInterpretModel(container, result, featureNames) {
         const lcResult = learningCurve(
             result.cls, result.model.getParams ? result.model.getParams() : {},
             _state.XTrain, _state.yTrain,
-            { cv: Math.min(_state.cvFolds, 3), scoring: 'f1' }
+            { cv: Math.min(_state.cvFolds, 3), scoring: 'f1', stratified: true }
         );
         renderLearningCurve(
             'learning-curve-plot',
@@ -1348,23 +1352,33 @@ async function runStackModels(container, featureNames, classes, classLabels) {
         const validResults = _state.results.filter(r => r.model);
         const topModels = validResults.slice(0, topN);
 
-        // Build stacked features for training data
-        const stackedTrainFeatures = _state.XTrain.map((_, sampleIdx) => {
-            const features = [];
-            for (const mr of topModels) {
-                const sampleInput = [_state.XTrain[sampleIdx]];
-                if (mr.model.predictProba) {
-                    const proba = mr.model.predictProba(sampleInput);
-                    features.push(...proba[0]);
-                } else {
-                    // One-hot encode predictions
-                    const pred = mr.model.predict(sampleInput)[0];
-                    const oneHot = classes.map(c => c === pred ? 1 : 0);
-                    features.push(...oneHot);
-                }
-            }
-            return features;
-        });
+        // Build out-of-fold stacked features so the meta learner never sees
+        // in-sample base predictions.
+        const featureWidth = topModels.length * classes.length;
+        const stackedTrainFeatures = Array.from(
+            { length: _state.XTrain.length },
+            () => new Array(featureWidth).fill(0)
+        );
+        const skf = new StratifiedKFold({ nSplits: _state.cvFolds, shuffle: true, randomState: 42 });
+        for (const [foldTrainIdx, foldValidIdx] of skf.split(_state.XTrain, _state.yTrain)) {
+            const foldXTrain = foldTrainIdx.map(i => _state.XTrain[i]);
+            const foldYTrain = foldTrainIdx.map(i => _state.yTrain[i]);
+            const foldXValid = foldValidIdx.map(i => _state.XTrain[i]);
+            topModels.forEach((mr, modelIdx) => {
+                const params = mr.model.getParams ? mr.model.getParams() : {};
+                const foldModel = new mr.cls(params);
+                foldModel.fit(foldXTrain, foldYTrain);
+                const foldFeatures = foldModel.predictProba
+                    ? foldModel.predictProba(foldXValid)
+                    : foldModel.predict(foldXValid).map(pred => classes.map(c => c === pred ? 1 : 0));
+                foldValidIdx.forEach((originalIdx, rowIdx) => {
+                    const offset = modelIdx * classes.length;
+                    for (let c = 0; c < classes.length; c++) {
+                        stackedTrainFeatures[originalIdx][offset + c] = foldFeatures[rowIdx][c] || 0;
+                    }
+                });
+            });
+        }
 
         // Build stacked features for test data
         const stackedTestFeatures = _state.XTest.map((_, sampleIdx) => {
@@ -1443,7 +1457,7 @@ async function runStackModels(container, featureNames, classes, classLabels) {
             <div style="background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1rem;">
                 <h4>スタッキング結果 (上位 ${topN} モデル + LogisticRegression メタ学習器)</h4>
                 <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-                    ベースモデル: ${topModels.map(m => m.badge).join(', ')} / メタ学習器: LogisticRegression
+                    ベースモデル: ${topModels.map(m => m.badge).join(', ')} / メタ学習器: LogisticRegression / Out-of-Fold予測で学習
                 </p>
                 <div class="table-container">
                     <table class="table">
@@ -1535,7 +1549,7 @@ async function runFinalizeModel(container, result, featureNames) {
         _state.finalizedModel = finalModel;
         _state.isFinalized = true;
 
-        const cvScores = crossValidate(finalModel, XFull, yFull, { cv: _state.cvFolds, scoring: 'f1' });
+        const cvScores = crossValidate(finalModel, XFull, yFull, { cv: _state.cvFolds, scoring: 'f1', stratified: true });
         const cvMean = cvScores.reduce((a, b) => a + b, 0) / cvScores.length;
         const cvStd = Math.sqrt(cvScores.reduce((a, v) => a + (v - cvMean) ** 2, 0) / cvScores.length);
 
@@ -1581,37 +1595,77 @@ async function runFinalizeModel(container, result, featureNames) {
     btnFinalize.disabled = false;
 }
 
-function runPredictModel(container, result, featureNames) {
-    const predictResult = container.querySelector('#predict-result');
+function renderPredictInput(featureName, index) {
+    const spec = _state.preprocessor?.featureSpecs?.find(s => s.name === featureName);
+    const label = _escapeHtml(featureName);
+    if (spec?.type === 'categorical' && spec.categories?.length) {
+        return `
+            <div>
+                <label style="font-weight: 600; font-size: 0.85rem; display: block; margin-bottom: 0.25rem;">${label}</label>
+                <select id="pred-${index}" class="form-select" style="width: 100%;">
+                    <option value="">選択してください</option>
+                    ${spec.categories.map(v => `<option value="${_escapeHtml(String(v))}">${_escapeHtml(String(v))}</option>`).join('')}
+                </select>
+            </div>
+        `;
+    }
+    return `
+        <div>
+            <label style="font-weight: 600; font-size: 0.85rem; display: block; margin-bottom: 0.25rem;">${label}</label>
+            <input type="number" id="pred-${index}" class="form-select" step="any" placeholder="値を入力" style="width: 100%;">
+        </div>
+    `;
+}
 
-    // Collect input values
-    const inputValues = [];
+function collectPredictInputs(container, featureNames) {
+    const values = [];
     let hasEmpty = false;
-    for (const f of featureNames) {
-        const input = container.querySelector(`#pred-${f}`);
+    let hasInvalidNumber = false;
+    for (let i = 0; i < featureNames.length; i++) {
+        const input = container.querySelector(`#pred-${i}`);
         if (!input || input.value === '') {
             hasEmpty = true;
             break;
         }
-        inputValues.push(parseFloat(input.value));
+        const spec = _state.preprocessor?.featureSpecs?.find(s => s.name === featureNames[i]);
+        if (spec?.type === 'categorical') {
+            values.push(input.value);
+        } else {
+            const value = parseFloat(input.value);
+            if (Number.isNaN(value)) hasInvalidNumber = true;
+            values.push(value);
+        }
     }
+    return { values, hasEmpty, hasInvalidNumber };
+}
+
+function _escapeHtml(value) {
+    return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+}
+
+function runPredictModel(container, result, featureNames) {
+    const predictResult = container.querySelector('#predict-result');
+    const { values: inputValues, hasEmpty, hasInvalidNumber } = collectPredictInputs(container, featureNames);
 
     if (hasEmpty) {
         predictResult.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> すべての特徴量に値を入力してください。</p>`;
         return;
     }
 
-    if (inputValues.some(v => isNaN(v))) {
+    if (hasInvalidNumber) {
         predictResult.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 数値を正しく入力してください。</p>`;
         return;
     }
 
     try {
-        // Apply scaler if used during training
-        let processedInput = [inputValues];
-        if (_state.scaler) {
-            processedInput = _state.scaler.transform(processedInput);
-        }
+        const processedInput = _state.preprocessor
+            ? _state.preprocessor.transformInput(inputValues, featureNames)
+            : (_state.scaler ? _state.scaler.transform([inputValues]) : [inputValues]);
 
         // Use finalized > stacked > blended > created > best model
         const activeModel = _state.finalizedModel || _state.stackedModel || _state.blendedModel

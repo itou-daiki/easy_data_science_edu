@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>easyDataScience - 使い方マニュアル</title>
+
+    <link rel="icon" href="favicon.ico" sizes="48x48">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+
+    <style>
+        :root {
+            --manual-sidebar-width: 280px;
+            --manual-top-height: 60px;
+            --manual-accent: #1e90ff;
+        }
+
+        body {
+            background: #f8fafc;
+            min-height: 100vh;
+        }
+
+        .manual-top-nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: var(--manual-top-height);
+            background: #1e293b;
+            color: white;
+            display: flex;
+            align-items: center;
+            padding: 0 1.5rem;
+            box-shadow: var(--shadow-md);
+            z-index: 100;
+        }
+
+        .manual-top-nav a {
+            color: white;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 600;
+        }
+
+        .manual-title {
+            margin-left: 1.5rem;
+            padding-left: 1.5rem;
+            border-left: 1px solid #334155;
+            font-size: 1.15rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .manual-layout {
+            display: flex;
+            padding-top: var(--manual-top-height);
+        }
+
+        .manual-sidebar {
+            position: fixed;
+            top: var(--manual-top-height);
+            bottom: 0;
+            left: 0;
+            width: var(--manual-sidebar-width);
+            background: white;
+            border-right: 1px solid var(--border-color);
+            overflow-y: auto;
+            padding: 1.25rem 0;
+        }
+
+        .manual-group {
+            margin-bottom: 1.25rem;
+        }
+
+        .manual-group-title {
+            padding: 0 1.4rem;
+            margin-bottom: 0.4rem;
+            color: #64748b;
+            font-size: 0.78rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+        }
+
+        .manual-link {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            padding: 0.55rem 1.4rem 0.55rem 1.8rem;
+            color: #334155;
+            text-decoration: none;
+            font-size: 0.92rem;
+            border-left: 3px solid transparent;
+            transition: all 0.2s ease;
+        }
+
+        .manual-link:hover,
+        .manual-link.active {
+            background: #eff6ff;
+            color: var(--manual-accent);
+            border-left-color: var(--manual-accent);
+            font-weight: 700;
+        }
+
+        .manual-link i {
+            width: 1rem;
+            color: #94a3b8;
+        }
+
+        .manual-content {
+            margin-left: var(--manual-sidebar-width);
+            width: min(980px, calc(100% - var(--manual-sidebar-width)));
+            padding: 2rem 3rem 4rem;
+        }
+
+        .manual-hero {
+            background: var(--manual-accent);
+            color: white;
+            border-radius: 18px;
+            padding: 2.5rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--shadow-lg);
+        }
+
+        .manual-hero h1 {
+            font-size: 2.2rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .manual-hero p {
+            max-width: 760px;
+            color: rgba(255, 255, 255, 0.92);
+            font-size: 1rem;
+        }
+
+        .manual-section {
+            background: white;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 1.75rem;
+            box-shadow: var(--shadow-sm);
+            scroll-margin-top: calc(var(--manual-top-height) + 1.5rem);
+        }
+
+        .manual-section h2 {
+            font-size: 1.45rem;
+            color: #0f172a;
+            margin-bottom: 1.1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 3px solid var(--manual-accent);
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+        }
+
+        .manual-section h3 {
+            margin-top: 1.6rem;
+            margin-bottom: 0.7rem;
+            padding-left: 0.7rem;
+            border-left: 4px solid #94a3b8;
+            font-size: 1.1rem;
+            color: #1e293b;
+        }
+
+        .manual-section p,
+        .manual-section li {
+            color: #475569;
+        }
+
+        .manual-section ul,
+        .manual-section ol {
+            padding-left: 1.35rem;
+            margin: 0.75rem 0;
+        }
+
+        .manual-section li {
+            margin-bottom: 0.35rem;
+        }
+
+        .manual-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .manual-card {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 1rem;
+        }
+
+        .manual-card h4 {
+            margin-bottom: 0.5rem;
+            color: #1e293b;
+            font-size: 1rem;
+        }
+
+        .manual-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            background: #eff6ff;
+            color: #1d4ed8;
+            border: 1px solid #bfdbfe;
+            border-radius: 999px;
+            padding: 0.2rem 0.65rem;
+            font-size: 0.78rem;
+            font-weight: 700;
+            margin: 0.25rem 0.25rem 0.25rem 0;
+        }
+
+        .manual-alert {
+            background: #eff6ff;
+            border-left: 4px solid var(--manual-accent);
+            border-radius: 0 8px 8px 0;
+            padding: 1rem;
+            margin: 1rem 0;
+            color: #1e40af;
+        }
+
+        .manual-warning {
+            background: #fffbeb;
+            border-left-color: #f59e0b;
+            color: #92400e;
+        }
+
+        .manual-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+            font-size: 0.9rem;
+        }
+
+        .manual-table th,
+        .manual-table td {
+            border: 1px solid #cbd5e1;
+            padding: 0.55rem;
+            text-align: left;
+        }
+
+        .manual-table th {
+            background: #f1f5f9;
+            color: #1e293b;
+        }
+
+        .manual-code {
+            background: #0f172a;
+            color: #e2e8f0;
+            border-radius: 8px;
+            padding: 1rem;
+            overflow-x: auto;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 860px) {
+            .manual-sidebar {
+                display: none;
+            }
+
+            .manual-content {
+                margin-left: 0;
+                width: 100%;
+                padding: 1rem;
+            }
+
+            .manual-top-nav {
+                padding: 0 1rem;
+            }
+
+            .manual-title {
+                margin-left: 1rem;
+                padding-left: 1rem;
+                font-size: 0.95rem;
+            }
+
+            .manual-hero,
+            .manual-section {
+                padding: 1.35rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <header class="manual-top-nav">
+        <a href="index.html"><i class="fas fa-arrow-left"></i> アプリへ戻る</a>
+        <div class="manual-title"><i class="fas fa-book-open"></i> easyDataScience 使い方マニュアル</div>
+    </header>
+
+    <div class="manual-layout">
+        <nav class="manual-sidebar">
+            <div class="manual-group">
+                <div class="manual-group-title">はじめに</div>
+                <a class="manual-link" href="#overview"><i class="fas fa-circle-info"></i> できること</a>
+                <a class="manual-link" href="#startup"><i class="fas fa-play"></i> 起動方法</a>
+                <a class="manual-link" href="#basic-flow"><i class="fas fa-route"></i> 基本操作</a>
+            </div>
+            <div class="manual-group">
+                <div class="manual-group-title">データ準備</div>
+                <a class="manual-link" href="#data-rules"><i class="fas fa-table"></i> 表の作り方</a>
+                <a class="manual-link" href="#data-types"><i class="fas fa-shapes"></i> データ型</a>
+                <a class="manual-link" href="#demo-data"><i class="fas fa-database"></i> デモデータ</a>
+            </div>
+            <div class="manual-group">
+                <div class="manual-group-title">表データ分析</div>
+                <a class="manual-link" href="#eda"><i class="fas fa-search"></i> EDA・前処理</a>
+                <a class="manual-link" href="#regression"><i class="fas fa-chart-line"></i> 回帰AutoML</a>
+                <a class="manual-link" href="#classification"><i class="fas fa-tags"></i> 分類AutoML</a>
+                <a class="manual-link" href="#workflow"><i class="fas fa-layer-group"></i> AutoML手順</a>
+            </div>
+            <div class="manual-group">
+                <div class="manual-group-title">モデル活用</div>
+                <a class="manual-link" href="#prediction-mode"><i class="fas fa-crosshairs"></i> 予測モード</a>
+                <a class="manual-link" href="#image"><i class="fas fa-image"></i> 画像分類</a>
+                <a class="manual-link" href="#audio"><i class="fas fa-microphone"></i> 音声分類</a>
+            </div>
+            <div class="manual-group">
+                <div class="manual-group-title">困ったとき</div>
+                <a class="manual-link" href="#reading"><i class="fas fa-chart-bar"></i> 結果の見方</a>
+                <a class="manual-link" href="#trouble"><i class="fas fa-triangle-exclamation"></i> FAQ</a>
+                <a class="manual-link" href="#checklist"><i class="fas fa-list-check"></i> チェックリスト</a>
+            </div>
+        </nav>
+
+        <main class="manual-content">
+            <section class="manual-hero">
+                <h1>easyDataScience 使い方マニュアル</h1>
+                <p>
+                    CSV / Excel の表データによる回帰・分類 AutoML、画像分類、音声分類、保存済みモデルによる予測までを、
+                    初学者でも迷わず進められるように整理したマニュアルです。
+                </p>
+            </section>
+
+            <section id="overview" class="manual-section">
+                <h2><i class="fas fa-circle-info"></i> 1. できること</h2>
+                <p>easyDataScience は、PyCaret のような機械学習ワークフローをブラウザ上で体験できる教育用アプリです。</p>
+                <div class="manual-grid">
+                    <div class="manual-card">
+                        <h4><i class="fas fa-graduation-cap"></i> 学ぶ</h4>
+                        <p>機械学習入門ガイドで、回帰・分類・評価指標・前処理を図解付きで確認できます。</p>
+                    </div>
+                    <div class="manual-card">
+                        <h4><i class="fas fa-robot"></i> 表データAutoML</h4>
+                        <p>CSV / Excel を読み込み、回帰・分類モデルを比較、チューニング、解釈、予測できます。</p>
+                    </div>
+                    <div class="manual-card">
+                        <h4><i class="fas fa-image"></i> 画像・音声分類</h4>
+                        <p>MobileNet 転移学習による画像分類と、Web Audio API による音声分類を体験できます。</p>
+                    </div>
+                    <div class="manual-card">
+                        <h4><i class="fas fa-file-import"></i> モデル活用</h4>
+                        <p>ファイナライズしたモデルを JSON で保存し、予測モードで再利用できます。</p>
+                    </div>
+                </div>
+                <div class="manual-alert">
+                    <strong>プライバシー:</strong> データ処理はブラウザ内で行われ、アップロードしたデータを外部サーバーへ送信しません。
+                </div>
+            </section>
+
+            <section id="startup" class="manual-section">
+                <h2><i class="fas fa-play"></i> 2. 起動方法</h2>
+                <h3>公開ページで使う</h3>
+                <p>公開されている easyDataScience のページをブラウザで開きます。インストールは不要です。</p>
+                <h3>ローカルで使う</h3>
+                <p>リポジトリを手元に置いて使う場合は、プロジェクトルートでローカルサーバーを起動します。</p>
+                <pre class="manual-code">python3 -m http.server 8765</pre>
+                <p>ブラウザで <code>http://localhost:8765</code> を開きます。</p>
+                <div class="manual-alert manual-warning">
+                    <strong>注意:</strong> <code>index.html</code> を直接開くと、ES Modules やデモデータの読み込みが失敗することがあります。
+                </div>
+            </section>
+
+            <section id="basic-flow" class="manual-section">
+                <h2><i class="fas fa-route"></i> 3. 基本操作</h2>
+                <ol>
+                    <li>データをアップロードする、またはデモデータを読み込む</li>
+                    <li>データプレビューと要約統計量を確認する</li>
+                    <li>必要に応じて EDA で分布、相関、欠損値を確認する</li>
+                    <li>目的変数の種類に合わせて「回帰」または「分類」を選ぶ</li>
+                    <li>目的変数、テストデータ割合、交差検証 Fold 数、特徴量を設定する</li>
+                    <li>モデル比較を開始する</li>
+                    <li>比較表、評価指標、グラフ、解釈結果を見る</li>
+                    <li>必要に応じてチューニング、ブレンド、スタッキング、ファイナライズを行う</li>
+                    <li>predict_model または予測モードで新しいデータを予測する</li>
+                </ol>
+            </section>
+
+            <section id="data-rules" class="manual-section">
+                <h2><i class="fas fa-table"></i> 4. 正しいデータ表の作り方</h2>
+                <p>機械学習では、データの形が結果の信頼性に直結します。読み込み前に、機械が解釈しやすい表へ整えてください。</p>
+                <h3>良い例</h3>
+                <table class="manual-table">
+                    <thead>
+                        <tr><th>面積</th><th>築年数</th><th>駅距離</th><th>部屋数</th><th>価格</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>65</td><td>12</td><td>8</td><td>3</td><td>4200</td></tr>
+                        <tr><td>80</td><td>5</td><td>4</td><td>4</td><td>6100</td></tr>
+                        <tr><td>45</td><td>25</td><td>15</td><td>2</td><td>2800</td></tr>
+                    </tbody>
+                </table>
+                <ul>
+                    <li>1行目は列名だけにする</li>
+                    <li>2行目以降にデータを入れる</li>
+                    <li>1件のデータを1行にする</li>
+                    <li>セル結合を使わない</li>
+                    <li>数値列に単位や「約」などの文字を混ぜない</li>
+                    <li>目的変数を1つ決めておく</li>
+                </ul>
+            </section>
+
+            <section id="data-types" class="manual-section">
+                <h2><i class="fas fa-shapes"></i> 5. データ型の考え方</h2>
+                <div class="manual-grid">
+                    <div class="manual-card">
+                        <h4>数値変数</h4>
+                        <p>価格、売上、年齢、面積、学習時間、テスト点数など。数値を予測したい場合は回帰を使います。</p>
+                    </div>
+                    <div class="manual-card">
+                        <h4>カテゴリ変数</h4>
+                        <p>解約する / しない、品種、クラス、合格 / 不合格など。カテゴリを予測したい場合は分類を使います。</p>
+                    </div>
+                    <div class="manual-card">
+                        <h4>画像・音声</h4>
+                        <p>画像分類と音声分類では、CSVではなく画像ファイルや音声サンプルを直接使います。</p>
+                    </div>
+                </div>
+            </section>
+
+            <section id="demo-data" class="manual-section">
+                <h2><i class="fas fa-database"></i> 6. デモデータ</h2>
+                <p>手元にデータがない場合は、トップ画面の「デモデータを試す」から読み込めます。</p>
+                <h3>回帰向け</h3>
+                <ul>
+                    <li><code>regression_demo.csv</code>: 住宅価格データ。面積や築年数から価格を予測します。</li>
+                    <li><code>tips.csv</code>: 食事の合計金額などからチップを予測します。</li>
+                </ul>
+                <h3>分類向け</h3>
+                <ul>
+                    <li><code>classification_demo.csv</code>: 顧客の解約を予測します。</li>
+                    <li><code>iris.csv</code>: 花の計測値から品種を分類します。</li>
+                    <li><code>wine.csv</code>: 化学分析値からワイン品種を分類します。</li>
+                    <li><code>penguins.csv</code>: 体の計測値から種類を分類します。</li>
+                </ul>
+            </section>
+
+            <section id="eda" class="manual-section">
+                <h2><i class="fas fa-search"></i> 7. EDA・前処理</h2>
+                <h3>探索的データ分析（EDA）</h3>
+                <p>データの分布、相関、欠損値を可視化します。回帰や分類に進む前に、外れ値、欠損、目的変数との関係を確認します。</p>
+                <span class="manual-badge">数値変数 1つ以上</span>
+                <h3>データ前処理</h3>
+                <p>欠損値補完、スケーリング、エンコーディングなど、機械学習に必要な前処理を確認します。AutoML 画面では学習時にも自動前処理が実行されます。</p>
+            </section>
+
+            <section id="regression" class="manual-section">
+                <h2><i class="fas fa-chart-line"></i> 8. 回帰モデル比較（AutoML）</h2>
+                <p>住宅価格、売上、テスト点数、チップ金額など、数値を予測したいときに使います。</p>
+                <span class="manual-badge">目的変数: 数値</span>
+                <span class="manual-badge">数値変数 2つ以上</span>
+                <h3>操作手順</h3>
+                <ol>
+                    <li>目的変数を選ぶ</li>
+                    <li>テストデータ割合を選ぶ</li>
+                    <li>交差検証 Fold 数を選ぶ</li>
+                    <li>使用する特徴量を確認する</li>
+                    <li>「モデル比較を開始」を押す</li>
+                    <li>R2、MAE、RMSE、CV R2 を確認する</li>
+                </ol>
+                <h3>搭載モデル</h3>
+                <p>線形回帰、Ridge回帰、Lasso回帰、決定木、ランダムフォレスト、K近傍法、勾配ブースティング。</p>
+            </section>
+
+            <section id="classification" class="manual-section">
+                <h2><i class="fas fa-tags"></i> 9. 分類モデル比較（AutoML）</h2>
+                <p>解約する / しない、品種、合格 / 不合格など、カテゴリを予測したいときに使います。</p>
+                <span class="manual-badge">目的変数: カテゴリ</span>
+                <span class="manual-badge">数値変数 1つ以上</span>
+                <h3>操作手順</h3>
+                <ol>
+                    <li>目的変数を選ぶ</li>
+                    <li>テストデータ割合を選ぶ</li>
+                    <li>交差検証 Fold 数を選ぶ</li>
+                    <li>使用する特徴量を確認する</li>
+                    <li>「モデル比較を開始」を押す</li>
+                    <li>F1、Accuracy、Precision、Recall、AUC、CV F1 を確認する</li>
+                </ol>
+                <h3>搭載モデル</h3>
+                <p>ロジスティック回帰、決定木、ランダムフォレスト、K近傍法、ナイーブベイズ、SVM、勾配ブースティング。</p>
+                <div class="manual-alert manual-warning">
+                    クラス不均衡がある場合は、Accuracy だけでなく F1、Precision、Recall、混同行列を確認してください。
+                </div>
+            </section>
+
+            <section id="workflow" class="manual-section">
+                <h2><i class="fas fa-layer-group"></i> 10. AutoML ワークフロー</h2>
+                <div class="manual-grid">
+                    <div class="manual-card"><h4>Setup</h4><p>目的変数、テスト割合、Fold数、特徴量を決めます。</p></div>
+                    <div class="manual-card"><h4>Preprocess</h4><p>データ分割、欠損処理、エンコーディング、スケーリングを行います。</p></div>
+                    <div class="manual-card"><h4>Compare</h4><p>複数モデルを一括学習し、テストデータと交差検証で比較します。</p></div>
+                    <div class="manual-card"><h4>Tune</h4><p>ハイパーパラメータを探索します。</p></div>
+                    <div class="manual-card"><h4>Interpret</h4><p>特徴量重要度、PDP、学習曲線、SHAP 系の可視化を確認します。</p></div>
+                    <div class="manual-card"><h4>Finalize / Predict</h4><p>最終モデルを確定し、新しいデータを予測します。</p></div>
+                </div>
+            </section>
+
+            <section id="prediction-mode" class="manual-section">
+                <h2><i class="fas fa-crosshairs"></i> 11. モデル保存と予測モード</h2>
+                <p>回帰・分類でファイナライズしたモデルは JSON ファイルとして保存できます。保存済みモデルはトップ画面の「モデル読み込み＆予測」から利用します。</p>
+                <ol>
+                    <li>JSON モデルファイルをアップロードする</li>
+                    <li>モデル名、タスク、目的変数、特徴量数を確認する</li>
+                    <li>表示された入力フォームに新しい特徴量を入力する</li>
+                    <li>「予測を実行」を押す</li>
+                </ol>
+            </section>
+
+            <section id="image" class="manual-section">
+                <h2><i class="fas fa-image"></i> 12. 画像分類（MobileNet）</h2>
+                <p>CSVデータを使わず、画像ファイルを直接アップロードして分類モデルを作ります。</p>
+                <span class="manual-badge">2クラス以上</span>
+                <span class="manual-badge">各クラス最低2枚</span>
+                <span class="manual-badge">JPEG / PNG / WebP</span>
+                <ol>
+                    <li>クラスを追加する</li>
+                    <li>各クラスに画像をアップロードする</li>
+                    <li>エポック数と検証データ割合を選ぶ</li>
+                    <li>学習を実行する</li>
+                    <li>評価結果、学習曲線、クラス別精度、混同行列を確認する</li>
+                    <li>新しい画像をアップロードして分類する</li>
+                </ol>
+            </section>
+
+            <section id="audio" class="manual-section">
+                <h2><i class="fas fa-microphone"></i> 13. 音声分類（Web Audio）</h2>
+                <p>マイク録音または音声ファイルからサンプルを集め、スペクトル特徴量を使って分類モデルを学習します。</p>
+                <span class="manual-badge">2クラス以上</span>
+                <span class="manual-badge">各クラス2サンプル以上</span>
+                <span class="manual-badge">3秒程度のクリップ</span>
+                <ol>
+                    <li>クラス名を入力して追加する</li>
+                    <li>各クラスで録音または音声サンプルをアップロードする</li>
+                    <li>学習を開始する</li>
+                    <li>評価結果、クラス別精度、混同行列を確認する</li>
+                    <li>新しい音声を録音またはアップロードして分類する</li>
+                </ol>
+                <div class="manual-alert manual-warning">
+                    マイク利用時はブラウザのマイク許可が必要です。周囲の雑音が多いと精度が落ちます。
+                </div>
+            </section>
+
+            <section id="reading" class="manual-section">
+                <h2><i class="fas fa-chart-bar"></i> 14. 結果の見方</h2>
+                <ul>
+                    <li>テストスコアと交差検証スコアを両方見る</li>
+                    <li>回帰では R2 だけでなく MAE と RMSE も確認する</li>
+                    <li>分類では Accuracy だけでなく F1、Precision、Recall、混同行列を確認する</li>
+                    <li>特徴量重要度は因果関係の証明ではなく、モデル解釈のヒントとして使う</li>
+                    <li>欠損、外れ値、カテゴリ表記ゆれ、クラス不均衡を確認する</li>
+                </ul>
+            </section>
+
+            <section id="trouble" class="manual-section">
+                <h2><i class="fas fa-triangle-exclamation"></i> 15. よくあるトラブル</h2>
+                <h3>ファイルが読み込めない</h3>
+                <p>拡張子、1行目の列名、空行、セル結合、装飾用の見出し行を確認してください。</p>
+                <h3>分析カードが押せない</h3>
+                <p>カードごとに必要なデータ条件があります。回帰は数値変数2つ以上、分類は数値変数1つ以上が必要です。</p>
+                <h3>数値列が特徴量として使えない</h3>
+                <p><code>80点</code>、<code>約60</code>、<code>1,000</code>、全角数字などが混ざっていないか確認してください。</p>
+                <h3>画像・音声分類がうまく学習しない</h3>
+                <p>各クラスのサンプル数、クラス間の偏り、撮影・録音条件、背景や雑音の違いを確認してください。</p>
+            </section>
+
+            <section id="checklist" class="manual-section">
+                <h2><i class="fas fa-list-check"></i> 16. 分析前チェックリスト</h2>
+                <ul>
+                    <li>目的変数を決めた</li>
+                    <li>目的変数が数値なら回帰、カテゴリなら分類を選ぶと決めた</li>
+                    <li>1行目が列名だけになっている</li>
+                    <li>セル結合や装飾用の見出し行がない</li>
+                    <li>数値列に単位や文字が混ざっていない</li>
+                    <li>欠損値と外れ値を確認した</li>
+                    <li>クラス不均衡を確認した</li>
+                    <li>テストスコアと交差検証スコアを両方見る</li>
+                    <li>モデル保存が必要な場合はファイナライズ後に JSON をダウンロードする</li>
+                </ul>
+                <p style="margin-top: 1.5rem; color: #64748b;">最終更新: 2026-05-04</p>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        document.querySelectorAll('.manual-link').forEach(anchor => {
+            anchor.addEventListener('click', function (event) {
+                event.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    window.scrollTo({
+                        top: target.offsetTop - 70,
+                        behavior: 'smooth'
+                    });
+                }
+            });
+        });
+
+        window.addEventListener('scroll', () => {
+            let current = '';
+            document.querySelectorAll('.manual-section').forEach(section => {
+                if (window.scrollY >= section.offsetTop - 90) {
+                    current = section.id;
+                }
+            });
+
+            document.querySelectorAll('.manual-link').forEach(link => {
+                link.classList.toggle('active', link.getAttribute('href') === `#${current}`);
+            });
+        });
+    </script>
+</body>
+
+</html>

@@ -4,8 +4,8 @@
 // ==========================================
 import { createSelect, createStepIndicator, formatNumber, renderPlot, renderActualVsPredicted, renderResidualPlot, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton, makeExportFileName, renderDataPreview, renderSummaryStatistics, downloadJSON, serializeModel, makeModelFileName } from '../utils.js';
 import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
-import { prepareFeatures } from '../ml/preprocessing.js';
-import { trainTestSplit, crossValidate, gridSearch, permutationImportance, learningCurve } from '../ml/model_selection.js';
+import { prepareTrainTestFeatures } from '../ml/preprocessing.js';
+import { KFold, crossValidate, gridSearch, permutationImportance, learningCurve } from '../ml/model_selection.js';
 import { meanAbsoluteError, meanSquaredError, rootMeanSquaredError, rSquared, adjustedRSquared } from '../ml/metrics.js';
 import { LinearRegression } from '../ml/regression/linear.js';
 import { RidgeRegression } from '../ml/regression/ridge.js';
@@ -173,15 +173,23 @@ async function runComparison(container, data, characteristics) {
     await new Promise(r => setTimeout(r, 100));
 
     try {
-        const { X, y, featureNames, encoders, scaler, preprocessInfo } = prepareFeatures(data, targetCol, {
+        const {
+            XTrain, XTest, yTrain, yTest,
+            featureNames, encoders, scaler, preprocessInfo, preprocessor
+        } = prepareTrainTestFeatures(data, targetCol, {
             selectedFeatures,
-            task: 'regression'
+            task: 'regression',
+            testSize,
+            randomState: 42
         });
 
-        const { XTrain, XTest, yTrain, yTest } = trainTestSplit(X, y, { testSize, randomState: 42 });
+        const effectiveCvFolds = Math.min(cvFolds, XTrain.length);
+        if (effectiveCvFolds < 2) {
+            throw new Error('交差検証には訓練データが2件以上必要です。');
+        }
 
         // Save state for tune/predict
-        _state = { XTrain, XTest, yTrain, yTest, featureNames, scaler, encoders, cvFolds, targetCol, fileName: characteristics.fileName || 'data' };
+        _state = { XTrain, XTest, yTrain, yTest, featureNames, scaler, encoders, preprocessor, cvFolds: effectiveCvFolds, targetCol, fileName: characteristics.fileName || 'data' };
 
         // Compute preprocessing info
         const missingCount = selectedFeatures.reduce((sum, col) => {
@@ -267,7 +275,7 @@ async function runComparison(container, data, characteristics) {
                 const yPred = model.predict(XTest);
 
                 // Cross-validation on training data
-                const cvScores = crossValidate(model, XTrain, yTrain, { cv: cvFolds, scoring: 'r2' });
+                const cvScores = crossValidate(model, XTrain, yTrain, { cv: _state.cvFolds, scoring: 'r2' });
                 const cvMean = cvScores.reduce((a, b) => a + b, 0) / cvScores.length;
                 const cvStd = Math.sqrt(cvScores.reduce((a, v) => a + (v - cvMean) ** 2, 0) / cvScores.length);
 
@@ -542,12 +550,7 @@ function showModelDetail(container, result, yTest, featureNames) {
                 各特徴量の値を入力して予測を実行します。
             </p>
             <div id="predict-inputs" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; margin: 1rem 0;">
-                ${featureNames.map(f => `
-                    <div>
-                        <label style="font-weight: 600; font-size: 0.85rem; display: block; margin-bottom: 0.25rem;">${f}</label>
-                        <input type="number" id="pred-${f}" class="form-select" step="any" placeholder="値を入力" style="width: 100%;">
-                    </div>
-                `).join('')}
+                ${featureNames.map((f, i) => renderPredictInput(f, i)).join('')}
             </div>
             <button id="btn-predict" class="btn-analysis" style="background: #2563eb; margin-top: 0.5rem;">
                 <i class="fas fa-play"></i> predict_model を実行
@@ -638,7 +641,7 @@ async function runTuneModel(container, result, featureNames) {
         const tunedMAE = meanAbsoluteError(_state.yTest, yPredTuned);
         const tunedRMSE = rootMeanSquaredError(_state.yTest, yPredTuned);
 
-        const improved = tunedR2 > result.r2;
+        const improved = bestScore > result.cvMean;
 
         tuneResults.innerHTML = `
             <div style="background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1rem;">
@@ -691,10 +694,10 @@ async function runTuneModel(container, result, featureNames) {
 
                 ${improved
                     ? `<p style="color: #10b981; font-weight: 600; margin-top: 1rem;">
-                        <i class="fas fa-check-circle"></i> チューニングによりテスト性能が改善しました！チューニング済みモデルを使用します。
+                        <i class="fas fa-check-circle"></i> チューニングによりCV性能が改善しました。以降はチューニング済みモデルを使用します。
                       </p>`
                     : `<p style="color: #f59e0b; font-weight: 600; margin-top: 1rem;">
-                        <i class="fas fa-info-circle"></i> テスト性能は改善しませんでしたが、CV R²は参考になります。
+                        <i class="fas fa-info-circle"></i> CV R²が改善しなかったため、元のモデルを維持します。
                       </p>`
                 }
 
@@ -1235,11 +1238,27 @@ async function runStackModels(container, featureNames) {
         const validResults = _state.results.filter(r => r.model);
         const baseModels = validResults.slice(0, topN);
 
-        // Generate meta-features from base model predictions on training data
-        const metaTrainFeatures = _state.XTrain.map(row => {
-            const singleRow = [row];
-            return baseModels.map(m => m.model.predict(singleRow)[0]);
-        });
+        // Generate out-of-fold meta-features to avoid training the meta model on
+        // in-sample base predictions.
+        const metaTrainFeatures = Array.from(
+            { length: _state.XTrain.length },
+            () => new Array(baseModels.length).fill(0)
+        );
+        const kf = new KFold({ nSplits: Math.min(_state.cvFolds, _state.XTrain.length), shuffle: true, randomState: 42 });
+        for (const [foldTrainIdx, foldValidIdx] of kf.split(_state.XTrain)) {
+            const foldXTrain = foldTrainIdx.map(i => _state.XTrain[i]);
+            const foldYTrain = foldTrainIdx.map(i => _state.yTrain[i]);
+            const foldXValid = foldValidIdx.map(i => _state.XTrain[i]);
+            baseModels.forEach((m, modelIdx) => {
+                const params = m.model.getParams ? m.model.getParams() : {};
+                const foldModel = new m.cls(params);
+                foldModel.fit(foldXTrain, foldYTrain);
+                const foldPred = foldModel.predict(foldXValid);
+                foldValidIdx.forEach((originalIdx, i) => {
+                    metaTrainFeatures[originalIdx][modelIdx] = foldPred[i];
+                });
+            });
+        }
 
         // Train meta-learner (LinearRegression) on base model predictions
         const metaLearner = new LinearRegression();
@@ -1287,7 +1306,7 @@ async function runStackModels(container, featureNames) {
             <div style="background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1rem;">
                 <h4>スタッキング結果 (上位 ${topN} モデル → LinearRegression メタモデル)</h4>
                 <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-                    ベースモデル: ${baseModels.map(m => m.badge).join(', ')} → メタモデルが最適な重み付けを学習
+                    ベースモデル: ${baseModels.map(m => m.badge).join(', ')} → Out-of-Fold予測でメタモデルを学習
                 </p>
 
                 ${metaCoeffs.length > 0 ? `
@@ -1446,37 +1465,77 @@ async function runFinalizeModel(container, result, featureNames) {
     btnFinalize.disabled = false;
 }
 
-function runPredictModel(container, result, featureNames) {
-    const predictResult = container.querySelector('#predict-result');
+function renderPredictInput(featureName, index) {
+    const spec = _state.preprocessor?.featureSpecs?.find(s => s.name === featureName);
+    const label = _escapeHtml(featureName);
+    if (spec?.type === 'categorical' && spec.categories?.length) {
+        return `
+            <div>
+                <label style="font-weight: 600; font-size: 0.85rem; display: block; margin-bottom: 0.25rem;">${label}</label>
+                <select id="pred-${index}" class="form-select" style="width: 100%;">
+                    <option value="">選択してください</option>
+                    ${spec.categories.map(v => `<option value="${_escapeHtml(String(v))}">${_escapeHtml(String(v))}</option>`).join('')}
+                </select>
+            </div>
+        `;
+    }
+    return `
+        <div>
+            <label style="font-weight: 600; font-size: 0.85rem; display: block; margin-bottom: 0.25rem;">${label}</label>
+            <input type="number" id="pred-${index}" class="form-select" step="any" placeholder="値を入力" style="width: 100%;">
+        </div>
+    `;
+}
 
-    // Collect input values
-    const inputValues = [];
+function collectPredictInputs(container, featureNames) {
+    const values = [];
     let hasEmpty = false;
-    for (const f of featureNames) {
-        const input = container.querySelector(`#pred-${f}`);
+    let hasInvalidNumber = false;
+    for (let i = 0; i < featureNames.length; i++) {
+        const input = container.querySelector(`#pred-${i}`);
         if (!input || input.value === '') {
             hasEmpty = true;
             break;
         }
-        inputValues.push(parseFloat(input.value));
+        const spec = _state.preprocessor?.featureSpecs?.find(s => s.name === featureNames[i]);
+        if (spec?.type === 'categorical') {
+            values.push(input.value);
+        } else {
+            const value = parseFloat(input.value);
+            if (Number.isNaN(value)) hasInvalidNumber = true;
+            values.push(value);
+        }
     }
+    return { values, hasEmpty, hasInvalidNumber };
+}
+
+function _escapeHtml(value) {
+    return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+}
+
+function runPredictModel(container, result, featureNames) {
+    const predictResult = container.querySelector('#predict-result');
+    const { values: inputValues, hasEmpty, hasInvalidNumber } = collectPredictInputs(container, featureNames);
 
     if (hasEmpty) {
         predictResult.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> すべての特徴量に値を入力してください。</p>`;
         return;
     }
 
-    if (inputValues.some(v => isNaN(v))) {
+    if (hasInvalidNumber) {
         predictResult.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 数値を正しく入力してください。</p>`;
         return;
     }
 
     try {
-        // Apply scaler if used during training
-        let processedInput = [inputValues];
-        if (_state.scaler) {
-            processedInput = _state.scaler.transform(processedInput);
-        }
+        const processedInput = _state.preprocessor
+            ? _state.preprocessor.transformInput(inputValues, featureNames)
+            : (_state.scaler ? _state.scaler.transform([inputValues]) : [inputValues]);
 
         // Use finalized model > stacked model > blended model > created model > original model
         const activeModel = _state.finalizedModel || _state.stackedModel || _state.blendedModel || _state.createdModel || result.model;

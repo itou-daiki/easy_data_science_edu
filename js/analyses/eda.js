@@ -114,7 +114,7 @@ function renderOverview(data, chars) {
                 <thead><tr><th>変数名</th><th>型</th><th>ユニーク数</th><th>欠損数</th><th>サンプル値</th></tr></thead>
                 <tbody>
                     ${cols.map(col => {
-                        const values = data.map(r => r[col]).filter(v => v != null);
+                        const values = data.map(r => r[col]).filter(v => v != null && v !== '');
                         const unique = new Set(values).size;
                         const missing = n - values.length;
                         const type = chars.numericColumns.includes(col) ? '数値' :
@@ -129,7 +129,9 @@ function renderOverview(data, chars) {
 }
 
 function renderDistribution(data, colName) {
-    const values = data.map(r => r[colName]).filter(v => v != null && !isNaN(Number(v))).map(Number);
+    const values = data.map(r => r[colName])
+        .filter(v => v != null && v !== '' && !isNaN(Number(v)))
+        .map(Number);
     if (values.length === 0) return;
 
     const plotData = [{
@@ -150,30 +152,34 @@ function renderDistribution(data, colName) {
     const sorted = [...values].sort((a, b) => a - b);
     const n = values.length;
     const mean = values.reduce((a, b) => a + b, 0) / n;
-    const std = Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1));
-    const skewness = (values.reduce((a, b) => a + ((b - mean) / std) ** 3, 0) / n);
-    const kurtosis = (values.reduce((a, b) => a + ((b - mean) / std) ** 4, 0) / n) - 3;
+    const std = n > 1 ? Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1)) : 0;
+    const skewness = std > 0 ? (values.reduce((a, b) => a + ((b - mean) / std) ** 3, 0) / n) : null;
+    const kurtosis = std > 0 ? (values.reduce((a, b) => a + ((b - mean) / std) ** 4, 0) / n) - 3 : null;
+    const median = quantile(sorted, 0.5);
 
     document.getElementById('distribution-stats').innerHTML = `
         <div class="metrics-grid">
             <div class="metric-card"><div class="metric-label">平均</div><div class="metric-value">${formatNumber(mean)}</div></div>
             <div class="metric-card"><div class="metric-label">標準偏差</div><div class="metric-value">${formatNumber(std)}</div></div>
-            <div class="metric-card"><div class="metric-label">中央値</div><div class="metric-value">${formatNumber(sorted[Math.floor(n / 2)])}</div></div>
-            <div class="metric-card"><div class="metric-label">歪度</div><div class="metric-value">${formatNumber(skewness)}</div></div>
-            <div class="metric-card"><div class="metric-label">尖度</div><div class="metric-value">${formatNumber(kurtosis)}</div></div>
+            <div class="metric-card"><div class="metric-label">中央値</div><div class="metric-value">${formatNumber(median)}</div></div>
+            <div class="metric-card"><div class="metric-label">歪度</div><div class="metric-value">${skewness == null ? '-' : formatNumber(skewness)}</div></div>
+            <div class="metric-card"><div class="metric-label">尖度</div><div class="metric-value">${kurtosis == null ? '-' : formatNumber(kurtosis)}</div></div>
         </div>
     `;
 }
 
 function renderCorrelation(data, numCols) {
-    const n = data.length;
     const matrix = [];
-    const values = numCols.map(col => data.map(r => Number(r[col]) || 0));
 
     for (let i = 0; i < numCols.length; i++) {
         const row = [];
         for (let j = 0; j < numCols.length; j++) {
-            row.push(pearsonCorrelation(values[i], values[j]));
+            const paired = data
+                .map(r => [Number(r[numCols[i]]), Number(r[numCols[j]])])
+                .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b));
+            row.push(paired.length >= 2
+                ? pearsonCorrelation(paired.map(p => p[0]), paired.map(p => p[1]))
+                : 0);
         }
         matrix.push(row);
     }
@@ -273,6 +279,17 @@ function pearsonCorrelation(x, y) {
     }
     const den = Math.sqrt(denX * denY);
     return den === 0 ? 0 : num / den;
+}
+
+function quantile(sorted, q) {
+    if (sorted.length === 0) return NaN;
+    if (sorted.length === 1) return sorted[0];
+    const pos = (sorted.length - 1) * q;
+    const base = Math.floor(pos);
+    const rest = pos - base;
+    return sorted[base + 1] !== undefined
+        ? sorted[base] + rest * (sorted[base + 1] - sorted[base])
+        : sorted[base];
 }
 
 function countDuplicates(data) {

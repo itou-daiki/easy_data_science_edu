@@ -156,9 +156,15 @@ export function trainTestSplit(X, y, options = {}) {
     trainIndices = [];
     testIndices = [];
 
-    for (const [, indices] of classIndices) {
+    for (const [cls, indices] of classIndices) {
+      if (indices.length < 2) {
+        throw new Error(
+          `trainTestSplit: class "${cls}" has only ${indices.length} sample; ` +
+          'stratified split requires at least 2 samples per class'
+        );
+      }
       const shuffled = shuffle ? _shuffle(indices, rng) : [...indices];
-      const nTest = Math.max(1, Math.round(shuffled.length * testSize));
+      const nTest = Math.min(shuffled.length - 1, Math.max(1, Math.round(shuffled.length * testSize)));
       testIndices.push(...shuffled.slice(0, nTest));
       trainIndices.push(...shuffled.slice(nTest));
     }
@@ -370,17 +376,21 @@ export class StratifiedKFold {
  * @param {Object} [options]
  * @param {number} [options.cv=5] - Number of folds
  * @param {'r2'|'accuracy'|'mse'|'neg_mse'|'mae'|'neg_mae'|'f1'|'precision'|'recall'} [options.scoring='r2']
+ * @param {boolean} [options.stratified=false] - Preserve class proportions across folds
  * @returns {number[]} Array of scores, one per fold
  */
 export function crossValidate(model, X, y, options = {}) {
   _validateXY(X, y, 'crossValidate');
-  const { cv = 5, scoring = 'r2' } = options;
+  const { cv = 5, scoring = 'r2', stratified = false } = options;
 
   const scorer = _getScorer(scoring);
-  const kf = new KFold({ nSplits: cv, shuffle: true, randomState: 42 });
+  const splitter = stratified
+    ? new StratifiedKFold({ nSplits: cv, shuffle: true, randomState: 42 })
+    : new KFold({ nSplits: cv, shuffle: true, randomState: 42 });
 
   const scores = [];
-  for (const [trainIdx, testIdx] of kf.split(X)) {
+  const folds = stratified ? splitter.split(X, y) : splitter.split(X);
+  for (const [trainIdx, testIdx] of folds) {
     const XTrain = _selectByIndices(X, trainIdx);
     const yTrain = _selectByIndices(y, trainIdx);
     const XTest = _selectByIndices(X, testIdx);
@@ -434,6 +444,7 @@ function _cloneModel(model) {
  * @param {Object} [options]
  * @param {number} [options.cv=3] - Number of CV folds
  * @param {'r2'|'accuracy'|'mse'|'neg_mse'|'mae'|'neg_mae'|'f1'|'precision'|'recall'} [options.scoring='r2']
+ * @param {boolean} [options.stratified=false] - Preserve class proportions across folds
  * @returns {{
  *   bestParams: Object,
  *   bestScore: number,
@@ -442,7 +453,7 @@ function _cloneModel(model) {
  */
 export function gridSearch(ModelClass, paramGrid, X, y, options = {}) {
   _validateXY(X, y, 'gridSearch');
-  const { cv = 3, scoring = 'r2' } = options;
+  const { cv = 3, scoring = 'r2', stratified = false } = options;
 
   if (typeof ModelClass !== 'function') {
     throw new Error('gridSearch: ModelClass must be a constructor function');
@@ -463,7 +474,7 @@ export function gridSearch(ModelClass, paramGrid, X, y, options = {}) {
     });
 
     const model = new ModelClass(params);
-    const scores = crossValidate(model, X, y, { cv, scoring });
+    const scores = crossValidate(model, X, y, { cv, scoring, stratified });
     const meanScore = scores.reduce((s, v) => s + v, 0) / scores.length;
 
     results.push({ params: { ...params }, meanScore, scores: [...scores] });
@@ -580,6 +591,7 @@ export function permutationImportance(model, X, y, options = {}) {
  * @param {number[]} [options.trainSizes] - Fractions of training data (default [0.1, 0.3, 0.5, 0.7, 0.9, 1.0])
  * @param {number} [options.cv=3]
  * @param {'r2'|'accuracy'|'f1'|string} [options.scoring='r2']
+ * @param {boolean} [options.stratified=false] - Preserve class proportions across folds
  * @returns {{ trainSizes: number[], trainScoresMean: number[], trainScoresStd: number[], testScoresMean: number[], testScoresStd: number[] }}
  */
 export function learningCurve(ModelClass, params, X, y, options = {}) {
@@ -588,10 +600,13 @@ export function learningCurve(ModelClass, params, X, y, options = {}) {
     trainSizes = [0.1, 0.3, 0.5, 0.7, 0.9, 1.0],
     cv = 3,
     scoring = 'r2',
+    stratified = false,
   } = options;
 
   const scorer = _getScorer(scoring);
-  const kf = new KFold({ nSplits: cv, shuffle: true, randomState: 42 });
+  const splitter = stratified
+    ? new StratifiedKFold({ nSplits: cv, shuffle: true, randomState: 42 })
+    : new KFold({ nSplits: cv, shuffle: true, randomState: 42 });
 
   const actualSizes = [];
   const trainScoresMean = [];
@@ -603,7 +618,8 @@ export function learningCurve(ModelClass, params, X, y, options = {}) {
     const foldTrainScores = [];
     const foldTestScores = [];
 
-    for (const [trainIdx, testIdx] of kf.split(X)) {
+    const folds = stratified ? splitter.split(X, y) : splitter.split(X);
+    for (const [trainIdx, testIdx] of folds) {
       const XTrainFull = _selectByIndices(X, trainIdx);
       const yTrainFull = _selectByIndices(y, trainIdx);
       const XTest = _selectByIndices(X, testIdx);

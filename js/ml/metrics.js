@@ -116,7 +116,7 @@ export function rSquared(yTrue, yPred) {
     ssRes += (yTrue[i] - yPred[i]) ** 2;
   }
 
-  if (ssTot === 0) return -Infinity;
+  if (ssTot === 0) return ssRes === 0 ? 1 : 0;
   return 1 - ssRes / ssTot;
 }
 
@@ -270,6 +270,7 @@ function _perClassMetrics(cm, classIdx) {
  */
 export function precisionScore(yTrue, yPred, average = 'macro') {
   _validatePair(yTrue, yPred, 'precisionScore');
+  _validateAverage(average, 'precisionScore');
   const { matrix, labels } = confusionMatrix(yTrue, yPred);
 
   if (average === 'micro') {
@@ -300,6 +301,7 @@ export function precisionScore(yTrue, yPred, average = 'macro') {
  */
 export function recallScore(yTrue, yPred, average = 'macro') {
   _validatePair(yTrue, yPred, 'recallScore');
+  _validateAverage(average, 'recallScore');
   const { matrix, labels } = confusionMatrix(yTrue, yPred);
 
   if (average === 'micro') {
@@ -329,6 +331,7 @@ export function recallScore(yTrue, yPred, average = 'macro') {
  */
 export function f1Score(yTrue, yPred, average = 'macro') {
   _validatePair(yTrue, yPred, 'f1Score');
+  _validateAverage(average, 'f1Score');
   const { matrix, labels } = confusionMatrix(yTrue, yPred);
 
   if (average === 'micro') {
@@ -376,6 +379,18 @@ function _microMetric(cm) {
 }
 
 /**
+ * Validate classification averaging mode.
+ * @param {string} average
+ * @param {string} context
+ */
+function _validateAverage(average, context) {
+  const valid = ['macro', 'micro', 'weighted'];
+  if (!valid.includes(average)) {
+    throw new Error(`${context}: average must be one of ${valid.join(', ')}`);
+  }
+}
+
+/**
  * Logarithmic loss (cross-entropy loss).
  *
  * For **binary** classification: yProba is a 1D array of P(class=1).
@@ -388,7 +403,7 @@ function _microMetric(cm) {
  * @param {number[]|number[][]} yProba - Predicted probabilities
  * @returns {number}
  */
-export function logLoss(yTrue, yProba) {
+export function logLoss(yTrue, yProba, labels = null) {
   if (!Array.isArray(yTrue) || yTrue.length === 0) {
     throw new Error('logLoss: yTrue must be a non-empty array');
   }
@@ -401,7 +416,7 @@ export function logLoss(yTrue, yProba) {
 
   // Binary case: yProba is 1D
   if (!Array.isArray(yProba[0])) {
-    const classes = _uniqueClasses(yTrue);
+    const classes = labels ? [...labels] : _uniqueClasses(yTrue);
     if (classes.length > 2) {
       throw new Error('logLoss: for multiclass, yProba must be 2D');
     }
@@ -419,7 +434,7 @@ export function logLoss(yTrue, yProba) {
   }
 
   // Multiclass case: yProba is 2D
-  const classes = _uniqueClasses(yTrue);
+  const classes = labels ? [...labels] : _uniqueClasses(yTrue);
   const classIdx = new Map(classes.map((c, i) => [c, i]));
   let sum = 0;
   for (let i = 0; i < n; i++) {
@@ -440,7 +455,7 @@ export function logLoss(yTrue, yProba) {
  * @param {number[]} yProba - Predicted probabilities for the positive class
  * @returns {number} AUC in [0, 1]
  */
-export function rocAucScore(yTrue, yProba) {
+export function rocAucScore(yTrue, yProba, positiveLabel = null) {
   if (!Array.isArray(yTrue) || !Array.isArray(yProba)) {
     throw new Error('rocAucScore: yTrue and yProba must be arrays');
   }
@@ -453,7 +468,12 @@ export function rocAucScore(yTrue, yProba) {
     throw new Error('rocAucScore: only binary classification is supported (found ' + classes.length + ' classes)');
   }
 
-  const positiveClass = classes[1]; // lexicographically larger class is positive
+  const positiveClass = positiveLabel !== null && positiveLabel !== undefined
+    ? positiveLabel
+    : classes[1]; // default: lexicographically larger class is positive
+  if (!classes.includes(positiveClass)) {
+    throw new Error(`rocAucScore: positiveLabel "${positiveClass}" is not present in yTrue`);
+  }
 
   // Pair probabilities with binary labels
   const pairs = yTrue.map((t, i) => ({
