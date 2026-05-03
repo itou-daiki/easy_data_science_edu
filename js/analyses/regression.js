@@ -284,7 +284,8 @@ async function runComparison(container, data, characteristics) {
                 const mse = meanSquaredError(yTest, yPred);
                 const rmse = rootMeanSquaredError(yTest, yPred);
                 const r2 = rSquared(yTest, yPred);
-                const adjR2 = adjustedRSquared(yTest, yPred, featureNames.length);
+                const adjR2 = safeAdjustedRSquared(yTest, yPred, featureNames.length);
+                const baseline = computeRegressionBaseline(_state.yTrain, yTest);
 
                 results.push({
                     name: modelDef.name,
@@ -292,6 +293,7 @@ async function runComparison(container, data, characteristics) {
                     cls: modelDef.cls,
                     model,
                     mae, mse, rmse, r2, adjR2,
+                    baseline,
                     cvMean, cvStd, cvScores,
                     yPred,
                     featureImportance: model.getFeatureImportance ? model.getFeatureImportance() : null
@@ -330,7 +332,7 @@ function renderComparisonResults(container, results, yTest, featureNames) {
     let html = `
         <h3 style="margin-top: 1rem;"><i class="fas fa-trophy" style="color: #d97706;"></i> モデル比較結果</h3>
         <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-            ${_state.cvFolds}-Fold 交差検証スコア（訓練データ）でソートしています。テストデータ (${yTest.length} サンプル) での評価結果も併記。
+            ${_state.cvFolds}-Fold 交差検証スコア（前処理後の訓練データ、参考値）でソートしています。テストデータ (${yTest.length} サンプル) での評価結果も併記。
         </p>
         <div class="table-container">
             <table class="table model-comparison-table">
@@ -338,8 +340,8 @@ function renderComparisonResults(container, results, yTest, featureNames) {
                     <tr>
                         <th>順位</th>
                         <th>モデル</th>
-                        <th>CV R² (mean)</th>
-                        <th>CV R² (std)</th>
+                        <th>CV R² 参考 (mean)</th>
+                        <th>CV R² 参考 (std)</th>
                         <th>Test R²</th>
                         <th>MAE</th>
                         <th>RMSE</th>
@@ -382,7 +384,7 @@ function renderComparisonResults(container, results, yTest, featureNames) {
     const dlCompBtn = comparisonDiv.querySelector('#dl-comparison-csv');
     if (dlCompBtn) {
         dlCompBtn.addEventListener('click', () => {
-            const headers = ['順位', 'モデル', 'Badge', 'CV R² (mean)', 'CV R² (std)', 'Test R²', 'MAE', 'RMSE'];
+            const headers = ['順位', 'モデル', 'Badge', 'CV R² 参考 (mean)', 'CV R² 参考 (std)', 'Test R²', 'MAE', 'RMSE'];
             const rows = _state.results.map((r, i) => [
                 r.model ? i + 1 : '-',
                 r.name,
@@ -417,12 +419,15 @@ function showModelDetail(container, result, yTest, featureNames) {
         <h3><i class="fas fa-chart-bar" style="color: #d97706;"></i> ${result.name} の詳細評価</h3>
 
         <div class="metrics-grid" style="margin: 1.5rem 0;">
-            ${createMetricCard('CV R² (mean)', result.cvMean, `${_state.cvFolds}-Fold 交差検証平均`)}
-            ${createMetricCard('CV R² (std)', result.cvStd, '交差検証の標準偏差')}
+            ${createMetricCard('CV R² 参考', result.cvMean, `${_state.cvFolds}-Fold 前処理後CV平均`)}
+            ${createMetricCard('CV R² 参考 std', result.cvStd, '前処理後CVの標準偏差')}
             ${createMetricCard('Test R²', result.r2, 'テストデータ決定係数')}
+            ${result.adjR2 == null ? '' : createMetricCard('Adjusted R²', result.adjR2, '特徴量数を考慮したR²')}
             ${createMetricCard('MAE', result.mae, '平均絶対誤差')}
             ${createMetricCard('RMSE', result.rmse, '二乗平均平方根誤差')}
         </div>
+
+        ${renderRegressionPerformanceDiagnostics(result, yTest)}
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 2rem;">
             <div><div id="actual-vs-pred-plot"></div></div>
@@ -430,6 +435,8 @@ function showModelDetail(container, result, yTest, featureNames) {
         </div>
 
         ${result.featureImportance ? '<div id="feature-importance-plot" style="margin-top: 2rem;"></div>' : ''}
+
+        ${renderRegressionModelDiagnostics(result, featureNames)}
 
         <div style="margin-top: 2rem;">
             <h4>結果の解釈</h4>
@@ -470,7 +477,7 @@ function showModelDetail(container, result, yTest, featureNames) {
         <div style="margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, #fef3c7, #fde68a); border-radius: 12px;">
             <h4><i class="fas fa-sliders-h" style="color: #d97706;"></i> tune_model - ハイパーパラメータチューニング</h4>
             <p style="color: #92400e; margin: 0.5rem 0;">
-                GridSearch CV でパラメータを最適化します。
+                GridSearch CV（前処理後データでの参考値）でパラメータを最適化します。
                 探索範囲: ${Object.entries(PARAM_GRIDS[result.badge]).map(([k, v]) => `${k}=[${v.join(', ')}]`).join(', ')}
             </p>
             <button id="btn-tune" class="btn-analysis" style="background: #d97706; margin-top: 1rem;">
@@ -671,7 +678,7 @@ async function runTuneModel(container, result, featureNames) {
             <div style="background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1rem;">
                 <h4>GridSearch 結果</h4>
                 <p><strong>Best Params:</strong> ${JSON.stringify(bestParams)}</p>
-                <p><strong>Best CV R² (mean):</strong> ${formatNumber(bestScore)}</p>
+                <p><strong>Best CV R² 参考 (mean):</strong> ${formatNumber(bestScore)}</p>
 
                 <h4 style="margin-top: 1rem;">Before vs After</h4>
                 <div class="table-container">
@@ -681,7 +688,7 @@ async function runTuneModel(container, result, featureNames) {
                         </thead>
                         <tbody>
                             <tr>
-                                <td>CV R² (mean)</td>
+                                <td>CV R² 参考 (mean)</td>
                                 <td>${formatNumber(result.cvMean)}</td>
                                 <td>${formatNumber(bestScore)}</td>
                                 <td style="color: ${bestScore > result.cvMean ? '#10b981' : '#ef4444'};">
@@ -721,7 +728,7 @@ async function runTuneModel(container, result, featureNames) {
                         <i class="fas fa-check-circle"></i> チューニングによりCV性能が改善しました。以降はチューニング済みモデルを使用します。
                       </p>`
                     : `<p style="color: #f59e0b; font-weight: 600; margin-top: 1rem;">
-                        <i class="fas fa-info-circle"></i> CV R²が改善しなかったため、元のモデルを維持します。
+                        <i class="fas fa-info-circle"></i> CV R²参考値が改善しなかったため、元のモデルを維持します。
                       </p>`
                 }
 
@@ -730,7 +737,7 @@ async function runTuneModel(container, result, featureNames) {
                     <div class="table-container" style="margin-top: 0.5rem;">
                         <table class="table" style="font-size: 0.85rem;">
                             <thead>
-                                <tr><th>順位</th><th>パラメータ</th><th>CV R² (mean)</th></tr>
+                                <tr><th>順位</th><th>パラメータ</th><th>CV R² 参考 (mean)</th></tr>
                             </thead>
                             <tbody>
                                 ${gsResults.map((gs, i) => `
@@ -850,7 +857,7 @@ async function runCreateModel(container, featureNames) {
                     パラメータ: ${JSON.stringify(params)}
                 </p>
                 <div class="metrics-grid" style="margin: 1rem 0;">
-                    ${createMetricCard('CV R² (mean)', cvMean, `${_state.cvFolds}-Fold 交差検証平均`)}
+                    ${createMetricCard('CV R² 参考', cvMean, `${_state.cvFolds}-Fold 前処理後CV平均`)}
                     ${createMetricCard('Test R²', r2, 'テストデータ決定係数')}
                     ${createMetricCard('MAE', mae, '平均絶対誤差')}
                     ${createMetricCard('RMSE', rmse, '二乗平均平方根誤差')}
@@ -1455,14 +1462,14 @@ async function runFinalizeModel(container, result, featureNames) {
                 </p>
                 <div class="metrics-grid" style="margin: 1rem 0;">
                     ${createMetricCard('学習サンプル数', XFull.length, '訓練+テストの全データ')}
-                    ${createMetricCard('CV R² (mean)', cvMean, `${_state.cvFolds}-Fold 全データCV`)}
-                    ${createMetricCard('CV R² (std)', cvStd, '交差検証の標準偏差')}
+                    ${createMetricCard('CV R² 参考', cvMean, `${_state.cvFolds}-Fold 全データCV参考`)}
+                    ${createMetricCard('CV R² 参考 std', cvStd, '全データCV参考の標準偏差')}
                 </div>
                 <div style="background: #f0fdf4; padding: 1rem; border-radius: 8px; border-left: 4px solid #10b981;">
                     <p style="color: #166534;">
                         <i class="fas fa-info-circle"></i>
                         これは本番用モデルです。predict_model では確定済みモデルで予測を行います。
-                        テストデータがなくなるため、テスト評価は行えませんが、CVスコアが参考になります。
+                        テストデータがなくなるため、独立したテスト評価は行えません。CVスコアは参考値として扱ってください。
                     </p>
                 </div>
                 ${createDownloadButton('dl-model-json', 'モデルをJSONダウンロード')}
@@ -1599,6 +1606,233 @@ function runPredictModel(container, result, featureNames) {
         predictResult.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 予測エラー: ${error.message}</p>`;
         console.error('Predict error:', error);
     }
+}
+
+function safeAdjustedRSquared(yTrue, yPred, numFeatures) {
+    try {
+        return adjustedRSquared(yTrue, yPred, numFeatures);
+    } catch {
+        return null;
+    }
+}
+
+function computeRegressionBaseline(yTrain, yTest) {
+    const trainMean = yTrain.reduce((sum, value) => sum + value, 0) / yTrain.length;
+    const baselinePred = yTest.map(() => trainMean);
+    return {
+        label: '訓練データ平均',
+        prediction: trainMean,
+        r2: rSquared(yTest, baselinePred),
+        mae: meanAbsoluteError(yTest, baselinePred),
+        rmse: rootMeanSquaredError(yTest, baselinePred)
+    };
+}
+
+function renderRegressionPerformanceDiagnostics(result, yTest) {
+    const baseline = result.baseline;
+    const residuals = yTest.map((actual, i) => actual - result.yPred[i]);
+    const residualMean = residuals.reduce((sum, value) => sum + value, 0) / residuals.length;
+    const residualStd = residuals.length > 1
+        ? Math.sqrt(residuals.reduce((sum, value) => sum + (value - residualMean) ** 2, 0) / (residuals.length - 1))
+        : 0;
+    const rmseReduction = baseline && Number.isFinite(baseline.rmse) && baseline.rmse !== 0
+        ? (baseline.rmse - result.rmse) / baseline.rmse
+        : null;
+    const maeReduction = baseline && Number.isFinite(baseline.mae) && baseline.mae !== 0
+        ? (baseline.mae - result.mae) / baseline.mae
+        : null;
+
+    return `
+        <div class="model-config" style="margin-top: 1.5rem;">
+            <h4><i class="fas fa-gauge-high"></i> 性能の妥当性チェック</h4>
+            <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">
+                Test指標を主に見ます。CVはモデル選択の参考値ですが、現在の実装では前処理済みデータに対するCVのため、過大評価の可能性があります。
+            </p>
+            <div class="table-container">
+                <table class="table">
+                    <thead><tr><th>指標</th><th>${result.name}</th><th>${baseline?.label || 'ベースライン'}</th><th>改善</th><th>見方</th></tr></thead>
+                    <tbody>
+                        <tr>
+                            <td>Test R²</td>
+                            <td>${formatNumber(result.r2)}</td>
+                            <td>${formatNumber(baseline?.r2)}</td>
+                            <td>${formatSigned(result.r2 - (baseline?.r2 ?? 0))}</td>
+                            <td>目的変数の分散をどれだけ説明できるか。高いほどよい。</td>
+                        </tr>
+                        <tr>
+                            <td>MAE</td>
+                            <td>${formatNumber(result.mae)}</td>
+                            <td>${formatNumber(baseline?.mae)}</td>
+                            <td>${formatPercent(maeReduction)}</td>
+                            <td>平均的な予測誤差。目的変数と同じ単位で読める。</td>
+                        </tr>
+                        <tr>
+                            <td>RMSE</td>
+                            <td>${formatNumber(result.rmse)}</td>
+                            <td>${formatNumber(baseline?.rmse)}</td>
+                            <td>${formatPercent(rmseReduction)}</td>
+                            <td>大きな外れ誤差を重く見る。MAEより大きく離れるほど外れ誤差に注意。</td>
+                        </tr>
+                        <tr>
+                            <td>残差平均</td>
+                            <td>${formatNumber(residualMean)}</td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td>0から大きく離れる場合、全体的な過大/過小予測の偏りがある。</td>
+                        </tr>
+                        <tr>
+                            <td>残差標準偏差</td>
+                            <td>${formatNumber(residualStd)}</td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td>予測誤差のばらつき。小さいほど安定。</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
+
+function renderRegressionModelDiagnostics(result, featureNames) {
+    const badge = result.badge;
+    const model = result.model;
+    if (!model) return '';
+
+    if (['Linear', 'Ridge', 'Lasso'].includes(badge)) {
+        const coefficients = model.coefficients || [];
+        const rows = coefficients.map((coef, i) => ({
+            name: featureNames[i],
+            coef,
+            abs: Math.abs(coef)
+        })).sort((a, b) => b.abs - a.abs);
+        const nonZero = coefficients.filter(value => Math.abs(value) > 1e-8).length;
+        const regularization = badge === 'Ridge'
+            ? `L2正則化 alpha=${formatNumber(model.alpha ?? 0)}`
+            : badge === 'Lasso'
+                ? `L1正則化 alpha=${formatNumber(model.alpha ?? 0)} / 非ゼロ係数 ${nonZero}/${coefficients.length}`
+                : '正則化なしのOLS';
+
+        return `
+            <div class="model-config" style="margin-top: 1.5rem;">
+                <h4><i class="fas fa-list-ol"></i> モデル固有の見方: 係数</h4>
+                <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">
+                    ${regularization}。係数は前処理後、主に標準化後特徴量に対する値です。数値特徴量では符号が方向、絶対値が影響の大きさの目安です。
+                    Label Encodingされたカテゴリ特徴量の係数はカテゴリ順序を意味しないため、符号や大小を強く解釈しないでください。
+                </p>
+                <div class="metrics-grid" style="margin: 1rem 0;">
+                    ${createMetricCard('切片', model.intercept, '前処理後スケールでの切片')}
+                    ${createMetricCard('非ゼロ係数', nonZero, badge === 'Lasso' ? 'Lassoの変数選択の目安' : '0でない係数数')}
+                </div>
+                ${renderCoefficientTable(rows)}
+            </div>
+        `;
+    }
+
+    if (['Tree', 'RF', 'GBM'].includes(badge)) {
+        const params = [
+            ['最大深さ', model.maxDepth],
+            ['木の数', model.nEstimators],
+            ['学習率', model.learningRate],
+            ['特徴量サブサンプル', model.maxFeatures],
+            ['サブサンプル', model.subsample]
+        ].filter(([, value]) => value != null);
+
+        return `
+            <div class="model-config" style="margin-top: 1.5rem;">
+                <h4><i class="fas fa-tree"></i> モデル固有の見方: 木構造・重要度</h4>
+                <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">
+                    このモデルに線形係数はありません。分岐による誤差低下から得た特徴量重要度を見ます。相関した特徴量があると重要度が分散する点に注意してください。
+                </p>
+                ${renderParameterTable(params)}
+                ${renderImportanceTable(featureNames, result.featureImportance)}
+            </div>
+        `;
+    }
+
+    if (badge === 'KNN') {
+        return `
+            <div class="model-config" style="margin-top: 1.5rem;">
+                <h4><i class="fas fa-street-view"></i> モデル固有の見方: 近傍法</h4>
+                <p style="color: var(--text-secondary); font-size: 0.9rem;">
+                    KNNに係数はありません。予測は近いサンプル ${model.nNeighbors} 件の目的変数から決まります。
+                    距離に基づくため、スケーリング済みであることと、外れ値・不要特徴量の影響に注意してください。
+                </p>
+                ${renderParameterTable([['近傍数 k', model.nNeighbors]])}
+            </div>
+        `;
+    }
+
+    return '';
+}
+
+function renderCoefficientTable(rows) {
+    return `
+        <div class="table-container">
+            <table class="table">
+                <thead><tr><th>特徴量</th><th>係数</th><th>絶対値</th><th>方向</th></tr></thead>
+                <tbody>
+                    ${rows.map(row => `
+                        <tr>
+                            <td><strong>${row.name}</strong></td>
+                            <td>${formatNumber(row.coef)}</td>
+                            <td>${formatNumber(row.abs)}</td>
+                            <td>${row.coef > 0 ? '増えると予測値が上がる傾向' : row.coef < 0 ? '増えると予測値が下がる傾向' : 'ほぼ影響なし'}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+function renderImportanceTable(featureNames, importances) {
+    if (!importances) return '';
+    const rows = featureNames.map((name, i) => ({
+        name,
+        importance: importances[i] || 0
+    })).sort((a, b) => b.importance - a.importance);
+
+    return `
+        <div class="table-container" style="margin-top: 1rem;">
+            <table class="table">
+                <thead><tr><th>特徴量</th><th>重要度</th><th>見方</th></tr></thead>
+                <tbody>
+                    ${rows.map(row => `
+                        <tr>
+                            <td><strong>${row.name}</strong></td>
+                            <td>${formatNumber(row.importance)}</td>
+                            <td>大きいほど分岐や予測に使われた度合いが高い</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+function renderParameterTable(params) {
+    if (!params.length) return '';
+    return `
+        <div class="table-container">
+            <table class="table">
+                <thead><tr><th>項目</th><th>値</th></tr></thead>
+                <tbody>
+                    ${params.map(([label, value]) => `<tr><td>${label}</td><td>${value}</td></tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+function formatSigned(value) {
+    if (value == null || Number.isNaN(value)) return '-';
+    return `${value >= 0 ? '+' : ''}${formatNumber(value)}`;
+}
+
+function formatPercent(value) {
+    if (value == null || Number.isNaN(value)) return '-';
+    return `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}%`;
 }
 
 function interpretResults(result) {

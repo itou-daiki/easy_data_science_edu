@@ -314,6 +314,7 @@ async function runComparison(container, data, characteristics) {
                 const f1 = f1Score(yTest, yPred);
                 const cmResult = confusionMatrix(yTest, yPred);
                 const cm = cmResult.matrix;
+                const baseline = computeClassificationBaseline(yTrain, yTest);
 
                 let auc = null;
                 let ll = null;
@@ -329,6 +330,7 @@ async function runComparison(container, data, characteristics) {
                     cls: modelDef.cls,
                     model,
                     acc, prec, rec, f1, cm, auc, ll,
+                    baseline,
                     cvMean, cvStd, cvScores,
                     yPred, yProba,
                     featureImportance: model.getFeatureImportance ? model.getFeatureImportance() : null
@@ -367,7 +369,7 @@ function renderComparisonResults(container, results, yTest, featureNames, classe
     let html = `
         <h3 style="margin-top: 1rem;"><i class="fas fa-trophy" style="color: #0891b2;"></i> モデル比較結果</h3>
         <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-            ${_state.cvFolds}-Fold 交差検証スコア（訓練データ）でソートしています。テストデータ (${yTest.length} サンプル) での評価結果も併記。
+            ${_state.cvFolds}-Fold 交差検証スコア（前処理後の訓練データ、参考値）でソートしています。テストデータ (${yTest.length} サンプル) での評価結果も併記。
         </p>
         <div class="table-container">
             <table class="table model-comparison-table">
@@ -375,8 +377,8 @@ function renderComparisonResults(container, results, yTest, featureNames, classe
                     <tr>
                         <th>順位</th>
                         <th>モデル</th>
-                        <th>CV F1 (mean)</th>
-                        <th>CV F1 (std)</th>
+                        <th>CV F1 参考 (mean)</th>
+                        <th>CV F1 参考 (std)</th>
                         <th>Test F1</th>
                         <th>Accuracy</th>
                         <th>Precision</th>
@@ -423,7 +425,7 @@ function renderComparisonResults(container, results, yTest, featureNames, classe
     const dlCompBtn = comparisonDiv.querySelector('#dl-comparison-csv');
     if (dlCompBtn) {
         dlCompBtn.addEventListener('click', () => {
-            const headers = ['順位', 'モデル', 'Badge', 'CV F1 (mean)', 'CV F1 (std)', 'Test F1', 'Accuracy', 'Precision', 'Recall'];
+            const headers = ['順位', 'モデル', 'Badge', 'CV F1 参考 (mean)', 'CV F1 参考 (std)', 'Test F1', 'Accuracy', 'Precision', 'Recall'];
             if (hasAuc) headers.push('AUC');
             const rows = results.map((r, i) => {
                 const row = [
@@ -464,14 +466,17 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
         <h3><i class="fas fa-chart-bar" style="color: #0891b2;"></i> ${result.name} の詳細評価</h3>
 
         <div class="metrics-grid" style="margin: 1.5rem 0;">
-            ${createMetricCard('CV F1 (mean)', result.cvMean, `${_state.cvFolds}-Fold 交差検証平均`)}
-            ${createMetricCard('CV F1 (std)', result.cvStd, '交差検証の標準偏差')}
+            ${createMetricCard('CV F1 参考', result.cvMean, `${_state.cvFolds}-Fold 前処理後CV平均`)}
+            ${createMetricCard('CV F1 参考 std', result.cvStd, '前処理後CVの標準偏差')}
             ${createMetricCard('Accuracy', result.acc, '正解率')}
-            ${createMetricCard('Precision', result.prec, '適合率')}
-            ${createMetricCard('Recall', result.rec, '再現率')}
-            ${createMetricCard('F1 Score', result.f1, 'F1スコア')}
+            ${createMetricCard('Macro Precision', result.prec, 'クラス平均の適合率')}
+            ${createMetricCard('Macro Recall', result.rec, 'クラス平均の再現率')}
+            ${createMetricCard('Macro F1', result.f1, 'クラス平均F1スコア')}
             ${result.auc != null ? createMetricCard('AUC', result.auc, 'ROC曲線下面積') : ''}
+            ${result.ll != null ? createMetricCard('Log Loss', result.ll, '小さいほど確率予測が良い') : ''}
         </div>
+
+        ${renderClassificationPerformanceDiagnostics(result, yTest, classLabels)}
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 2rem;">
             <div id="confusion-matrix-plot"></div>
@@ -479,6 +484,8 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
         </div>
 
         ${result.featureImportance ? '<div id="feature-importance-plot" style="margin-top: 2rem;"></div>' : ''}
+
+        ${renderClassificationModelDiagnostics(result, featureNames, classLabels)}
 
         <div style="margin-top: 2rem;">
             <h4>結果の解釈</h4>
@@ -519,7 +526,7 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
         <div style="margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, #cffafe, #a5f3fc); border-radius: 12px;">
             <h4><i class="fas fa-sliders-h" style="color: #0891b2;"></i> tune_model - ハイパーパラメータチューニング</h4>
             <p style="color: #164e63; margin: 0.5rem 0;">
-                GridSearch CV でパラメータを最適化します。
+                GridSearch CV（前処理後データでの参考値）でパラメータを最適化します。
                 探索範囲: ${Object.entries(PARAM_GRIDS[result.badge]).map(([k, v]) => `${k}=[${v.join(', ')}]`).join(', ')}
             </p>
             <button id="btn-tune" class="btn-analysis" style="background: #0891b2; margin-top: 1rem;">
@@ -778,7 +785,7 @@ async function runCreateModel(container, featureNames, classes, classLabels) {
                     パラメータ: ${JSON.stringify(mergedParams)}
                 </p>
                 <div class="metrics-grid" style="margin: 1rem 0;">
-                    ${createMetricCard('CV F1 (mean)', cvMean, `${_state.cvFolds}-Fold CV`)}
+                    ${createMetricCard('CV F1 参考', cvMean, `${_state.cvFolds}-Fold 前処理後CV`)}
                     ${createMetricCard('Accuracy', acc, '正解率')}
                     ${createMetricCard('F1 Score', f1, 'F1スコア')}
                     ${createMetricCard('Precision', prec, '適合率')}
@@ -840,7 +847,7 @@ async function runTuneModel(container, result, featureNames, classes, classLabel
             <div style="background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1rem;">
                 <h4>GridSearch 結果</h4>
                 <p><strong>Best Params:</strong> ${JSON.stringify(bestParams)}</p>
-                <p><strong>Best CV F1 (mean):</strong> ${formatNumber(bestScore)}</p>
+                <p><strong>Best CV F1 参考 (mean):</strong> ${formatNumber(bestScore)}</p>
 
                 <h4 style="margin-top: 1rem;">Before vs After</h4>
                 <div class="table-container">
@@ -850,7 +857,7 @@ async function runTuneModel(container, result, featureNames, classes, classLabel
                         </thead>
                         <tbody>
                             <tr>
-                                <td>CV F1 (mean)</td>
+                                <td>CV F1 参考 (mean)</td>
                                 <td>${formatNumber(result.cvMean)}</td>
                                 <td>${formatNumber(bestScore)}</td>
                                 <td style="color: ${bestScore > result.cvMean ? '#10b981' : '#ef4444'};">
@@ -898,7 +905,7 @@ async function runTuneModel(container, result, featureNames, classes, classLabel
                         <i class="fas fa-check-circle"></i> チューニングによりCV性能が改善しました。以降はチューニング済みモデルを使用します。
                       </p>`
                     : `<p style="color: #f59e0b; font-weight: 600; margin-top: 1rem;">
-                        <i class="fas fa-info-circle"></i> CV F1が改善しなかったため、元のモデルを維持します。
+                        <i class="fas fa-info-circle"></i> CV F1参考値が改善しなかったため、元のモデルを維持します。
                       </p>`
                 }
 
@@ -907,7 +914,7 @@ async function runTuneModel(container, result, featureNames, classes, classLabel
                     <div class="table-container" style="margin-top: 0.5rem;">
                         <table class="table" style="font-size: 0.85rem;">
                             <thead>
-                                <tr><th>順位</th><th>パラメータ</th><th>CV F1 (mean)</th></tr>
+                                <tr><th>順位</th><th>パラメータ</th><th>CV F1 参考 (mean)</th></tr>
                             </thead>
                             <tbody>
                                 ${gsResults.map((gs, i) => `
@@ -941,6 +948,7 @@ async function runTuneModel(container, result, featureNames, classes, classLabel
             if (result.yProba && classes.length === 2) {
                 const positiveProba = result.yProba.map(p => p[1] || 0);
                 result.auc = rocAucScore(_state.yTest, positiveProba, classes[1]);
+                result.ll = logLoss(_state.yTest, result.yProba, classes);
             }
         }
 
@@ -1588,14 +1596,14 @@ async function runFinalizeModel(container, result, featureNames) {
                 </p>
                 <div class="metrics-grid" style="margin: 1rem 0;">
                     ${createMetricCard('学習サンプル数', XFull.length, '訓練+テストの全データ')}
-                    ${createMetricCard('CV F1 (mean)', cvMean, `${_state.cvFolds}-Fold 全データCV`)}
-                    ${createMetricCard('CV F1 (std)', cvStd, '交差検証の標準偏差')}
+                    ${createMetricCard('CV F1 参考', cvMean, `${_state.cvFolds}-Fold 全データCV参考`)}
+                    ${createMetricCard('CV F1 参考 std', cvStd, '全データCV参考の標準偏差')}
                 </div>
                 <div style="background: #f0fdf4; padding: 1rem; border-radius: 8px; border-left: 4px solid #10b981;">
                     <p style="color: #166534;">
                         <i class="fas fa-info-circle"></i>
                         これは本番用モデルです。predict_model では確定済みモデルで予測を行います。
-                        テストデータがなくなるため、テスト評価は行えませんが、CVスコアが参考になります。
+                        テストデータがなくなるため、独立したテスト評価は行えません。CVスコアは参考値として扱ってください。
                     </p>
                 </div>
                 ${createDownloadButton('dl-model-json', 'モデルをJSONダウンロード')}
@@ -1768,6 +1776,270 @@ function runPredictModel(container, result, featureNames) {
         predictResult.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 予測エラー: ${error.message}</p>`;
         console.error('Predict error:', error);
     }
+}
+
+function computeClassificationBaseline(yTrain, yTest) {
+    const counts = new Map();
+    yTrain.forEach(label => counts.set(label, (counts.get(label) || 0) + 1));
+    let majorityClass = yTrain[0];
+    let bestCount = -1;
+    for (const [label, count] of counts) {
+        if (count > bestCount) {
+            bestCount = count;
+            majorityClass = label;
+        }
+    }
+    const yPred = yTest.map(() => majorityClass);
+    return {
+        label: '多数派クラス',
+        majorityClass,
+        acc: accuracy(yTest, yPred),
+        prec: precisionScore(yTest, yPred),
+        rec: recallScore(yTest, yPred),
+        f1: f1Score(yTest, yPred)
+    };
+}
+
+function renderClassificationPerformanceDiagnostics(result, yTest, classLabels) {
+    const baseline = result.baseline;
+    const perClassRows = computePerClassRows(result.cm, classLabels);
+    const testCounts = classLabels.map((label, idx) => ({
+        label,
+        count: yTest.filter(value => value === _state.classes[idx]).length
+    }));
+
+    return `
+        <div class="model-config" style="margin-top: 1.5rem;">
+            <h4><i class="fas fa-gauge-high"></i> 性能の妥当性チェック</h4>
+            <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">
+                Accuracyだけでなく、クラス平均のPrecision/Recall/F1と多数派クラスだけを予測するベースラインとの差を確認します。
+                CVは現在の実装では前処理済みデータに対する参考値のため、Test指標と混同行列を重視してください。
+            </p>
+            <div class="table-container">
+                <table class="table">
+                    <thead><tr><th>指標</th><th>${result.name}</th><th>${baseline?.label || 'ベースライン'}</th><th>差分</th><th>見方</th></tr></thead>
+                    <tbody>
+                        <tr><td>Accuracy</td><td>${formatNumber(result.acc)}</td><td>${formatNumber(baseline?.acc)}</td><td>${formatSigned(result.acc - (baseline?.acc ?? 0))}</td><td>全体の正解率。クラス不均衡では過信しない。</td></tr>
+                        <tr><td>Macro Precision</td><td>${formatNumber(result.prec)}</td><td>${formatNumber(baseline?.prec)}</td><td>${formatSigned(result.prec - (baseline?.prec ?? 0))}</td><td>予測したクラスがどれだけ当たるかのクラス平均。</td></tr>
+                        <tr><td>Macro Recall</td><td>${formatNumber(result.rec)}</td><td>${formatNumber(baseline?.rec)}</td><td>${formatSigned(result.rec - (baseline?.rec ?? 0))}</td><td>各クラスをどれだけ取りこぼさないかのクラス平均。</td></tr>
+                        <tr><td>Macro F1</td><td>${formatNumber(result.f1)}</td><td>${formatNumber(baseline?.f1)}</td><td>${formatSigned(result.f1 - (baseline?.f1 ?? 0))}</td><td>PrecisionとRecallのバランス。比較の主指標。</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h4 style="margin-top: 1.5rem;">クラス別指標</h4>
+            <div class="table-container">
+                <table class="table">
+                    <thead><tr><th>クラス</th><th>Test件数</th><th>Precision</th><th>Recall</th><th>F1</th><th>見方</th></tr></thead>
+                    <tbody>
+                        ${perClassRows.map((row, idx) => `
+                            <tr>
+                                <td><strong>${row.label}</strong></td>
+                                <td>${testCounts[idx]?.count ?? 0}</td>
+                                <td>${formatNumber(row.precision)}</td>
+                                <td>${formatNumber(row.recall)}</td>
+                                <td>${formatNumber(row.f1)}</td>
+                                <td>${row.recall < 0.5 ? '取りこぼしに注意' : row.precision < 0.5 ? '誤検出に注意' : '概ね安定'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
+
+function renderClassificationModelDiagnostics(result, featureNames, classLabels) {
+    const badge = result.badge;
+    const model = result.model;
+    if (!model) return '';
+
+    if (badge === 'LR' || badge === 'SVM') {
+        const isSvm = badge === 'SVM';
+        const rows = createWeightRows(model.weights || [], featureNames, classLabels);
+        const targetText = classLabels.length === 2
+            ? `${classLabels[classLabels.length - 1]} 方向`
+            : 'One-vs-Restの平均絶対値';
+
+        return `
+            <div class="model-config" style="margin-top: 1.5rem;">
+                <h4><i class="fas fa-list-ol"></i> モデル固有の見方: ${isSvm ? 'マージン重み' : '係数'}</h4>
+                <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">
+                    ${isSvm
+                        ? 'SVMに表示される値は分類境界のマージン重みです。確率はsigmoid近似で未キャリブレーションのため、確率値やLog Lossは参考扱いにしてください。'
+                        : 'ロジスティック回帰の係数は標準化後特徴量に対するlog-oddsの変化です。符号はクラス方向、絶対値は影響の目安です。'}
+                    Label Encodingされたカテゴリ特徴量の係数はカテゴリ順序を意味しないため、強く解釈しないでください。
+                </p>
+                <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 1rem;">表示方向: ${targetText}</p>
+                ${renderWeightTable(rows, isSvm)}
+            </div>
+        `;
+    }
+
+    if (['Tree', 'RF', 'GBM'].includes(badge)) {
+        const params = [
+            ['最大深さ', model.maxDepth],
+            ['木の数', model.nEstimators],
+            ['学習率', model.learningRate],
+            ['特徴量サブサンプル', model.maxFeatures],
+            ['サブサンプル', model.subsample]
+        ].filter(([, value]) => value != null);
+
+        return `
+            <div class="model-config" style="margin-top: 1.5rem;">
+                <h4><i class="fas fa-tree"></i> モデル固有の見方: 木構造・重要度</h4>
+                <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">
+                    このモデルに係数はありません。分岐の不純度低下などから得た特徴量重要度を確認します。相関した特徴量があると重要度は分散します。
+                </p>
+                ${renderParameterTable(params)}
+                ${renderImportanceTable(featureNames, result.featureImportance)}
+            </div>
+        `;
+    }
+
+    if (badge === 'KNN') {
+        return `
+            <div class="model-config" style="margin-top: 1.5rem;">
+                <h4><i class="fas fa-street-view"></i> モデル固有の見方: 近傍法</h4>
+                <p style="color: var(--text-secondary); font-size: 0.9rem;">
+                    KNNに係数はありません。近いサンプル ${model.nNeighbors} 件の多数決または距離重みで分類します。
+                    距離ベースなのでスケーリング、不要特徴量、外れ値の影響を確認してください。
+                </p>
+                ${renderParameterTable([['近傍数 k', model.nNeighbors], ['重み付け', model.weights]])}
+            </div>
+        `;
+    }
+
+    if (badge === 'NB') {
+        const priors = model.classes.map((cls, idx) => [
+            classLabels[idx] ?? cls,
+            formatNumber(model.classPriors[cls])
+        ]);
+        return `
+            <div class="model-config" style="margin-top: 1.5rem;">
+                <h4><i class="fas fa-chart-pie"></i> モデル固有の見方: Naive Bayes</h4>
+                <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">
+                    Naive Bayesに係数はありません。各クラスの事前確率と、特徴量がクラスごとに正規分布に従うという仮定で分類します。
+                    特徴量同士が強く相関する場合、仮定が崩れる点に注意してください。
+                </p>
+                ${renderParameterTable(priors.map(([label, prior]) => [`事前確率: ${label}`, prior]))}
+                ${renderImportanceTable(featureNames, result.featureImportance)}
+            </div>
+        `;
+    }
+
+    return '';
+}
+
+function computePerClassRows(cm, classLabels) {
+    if (!cm) return [];
+    return classLabels.map((label, idx) => {
+        const tp = cm[idx]?.[idx] || 0;
+        let fp = 0;
+        let fn = 0;
+        for (let r = 0; r < cm.length; r++) {
+            if (r !== idx) fp += cm[r]?.[idx] || 0;
+            if (r !== idx) fn += cm[idx]?.[r] || 0;
+        }
+        const precision = tp + fp > 0 ? tp / (tp + fp) : 0;
+        const recall = tp + fn > 0 ? tp / (tp + fn) : 0;
+        const f1 = precision + recall > 0 ? 2 * precision * recall / (precision + recall) : 0;
+        return { label, precision, recall, f1 };
+    });
+}
+
+function createWeightRows(weights, featureNames, classLabels) {
+    if (!weights.length) return [];
+    const nFeatures = featureNames.length;
+
+    if (weights.length === 1) {
+        return featureNames.map((name, idx) => ({
+            name,
+            value: weights[0][idx],
+            abs: Math.abs(weights[0][idx]),
+            direction: weights[0][idx] > 0
+                ? `${classLabels[classLabels.length - 1]} に寄る`
+                : weights[0][idx] < 0
+                    ? `${classLabels[0]} に寄る`
+                    : 'ほぼ影響なし'
+        })).sort((a, b) => b.abs - a.abs);
+    }
+
+    return featureNames.map((name, idx) => {
+        const values = weights.map(w => w[idx] || 0);
+        const meanAbs = values.reduce((sum, value) => sum + Math.abs(value), 0) / values.length;
+        const maxIdx = values.map(Math.abs).indexOf(Math.max(...values.map(Math.abs)));
+        return {
+            name,
+            value: meanAbs,
+            abs: meanAbs,
+            direction: `${classLabels[maxIdx] ?? `クラス${maxIdx}`} の識別に強い`
+        };
+    }).sort((a, b) => b.abs - a.abs).slice(0, nFeatures);
+}
+
+function renderWeightTable(rows, isSvm) {
+    return `
+        <div class="table-container">
+            <table class="table">
+                <thead><tr><th>特徴量</th><th>${isSvm ? '重み' : '係数'}</th><th>絶対値</th><th>方向/解釈</th></tr></thead>
+                <tbody>
+                    ${rows.map(row => `
+                        <tr>
+                            <td><strong>${row.name}</strong></td>
+                            <td>${formatNumber(row.value)}</td>
+                            <td>${formatNumber(row.abs)}</td>
+                            <td>${row.direction}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+function renderImportanceTable(featureNames, importances) {
+    if (!importances) return '';
+    const rows = featureNames.map((name, i) => ({
+        name,
+        importance: importances[i] || 0
+    })).sort((a, b) => b.importance - a.importance);
+
+    return `
+        <div class="table-container" style="margin-top: 1rem;">
+            <table class="table">
+                <thead><tr><th>特徴量</th><th>重要度</th><th>見方</th></tr></thead>
+                <tbody>
+                    ${rows.map(row => `
+                        <tr>
+                            <td><strong>${row.name}</strong></td>
+                            <td>${formatNumber(row.importance)}</td>
+                            <td>大きいほど分類に使われた度合いが高い</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+function renderParameterTable(params) {
+    if (!params.length) return '';
+    return `
+        <div class="table-container">
+            <table class="table">
+                <thead><tr><th>項目</th><th>値</th></tr></thead>
+                <tbody>
+                    ${params.map(([label, value]) => `<tr><td>${label}</td><td>${value}</td></tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+function formatSigned(value) {
+    if (value == null || Number.isNaN(value)) return '-';
+    return `${value >= 0 ? '+' : ''}${formatNumber(value)}`;
 }
 
 function interpretResults(result) {
