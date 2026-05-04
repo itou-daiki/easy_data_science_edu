@@ -7,7 +7,7 @@ import { buildAnalysisContext, renderAIAssistPanel } from '../ai_assistant.js';
 import { buildAnalysisQualityReport, getAnalysisQualityNotes, renderAnalysisQualityPanel } from '../analysis_quality.js';
 import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
 import { prepareTrainTestFeatures } from '../ml/preprocessing.js';
-import { KFold, crossValidate, gridSearch, permutationImportance, learningCurve } from '../ml/model_selection.js';
+import { KFold, crossValidateWithPreprocessing, gridSearchWithPreprocessing, permutationImportance, learningCurve } from '../ml/model_selection.js';
 import { meanAbsoluteError, meanSquaredError, rootMeanSquaredError, rSquared, adjustedRSquared } from '../ml/metrics.js';
 import { LinearRegression } from '../ml/regression/linear.js';
 import { RidgeRegression } from '../ml/regression/ridge.js';
@@ -177,7 +177,7 @@ async function runComparison(container, data, characteristics) {
     try {
         const {
             XTrain, XTest, yTrain, yTest,
-            featureNames, encoders, scaler, preprocessInfo, preprocessor
+            featureNames, encoders, scaler, preprocessInfo, preprocessor, trainRows, testRows
         } = prepareTrainTestFeatures(data, targetCol, {
             selectedFeatures,
             task: 'regression',
@@ -199,6 +199,8 @@ async function runComparison(container, data, characteristics) {
             targetCol,
             selectedFeatures,
             preprocessInfo,
+            trainRows,
+            testRows,
             fileName: characteristics.fileName || 'data',
             rawData: data,
             characteristics
@@ -289,8 +291,14 @@ async function runComparison(container, data, characteristics) {
                 model.fit(XTrain, yTrain);
                 const yPred = model.predict(XTest);
 
-                // Cross-validation on training data
-                const cvScores = crossValidate(model, XTrain, yTrain, { cv: _state.cvFolds, scoring: 'r2' });
+                // Cross-validation with preprocessing fitted inside each fold.
+                const cvScores = crossValidateWithPreprocessing(modelDef.cls, _state.trainRows, _state.targetCol, {
+                    params: modelDef.params,
+                    cv: _state.cvFolds,
+                    scoring: 'r2',
+                    task: 'regression',
+                    selectedFeatures: _state.selectedFeatures
+                });
                 const cvMean = cvScores.reduce((a, b) => a + b, 0) / cvScores.length;
                 const cvStd = Math.sqrt(cvScores.reduce((a, v) => a + (v - cvMean) ** 2, 0) / cvScores.length);
 
@@ -346,7 +354,7 @@ function renderComparisonResults(container, results, yTest, featureNames) {
     let html = `
         <h3 style="margin-top: 1rem;"><i class="fas fa-trophy" style="color: #d97706;"></i> モデル比較結果</h3>
         <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-            ${_state.cvFolds}-Fold 交差検証スコア（前処理後の訓練データ、参考値）でソートしています。テストデータ (${yTest.length} サンプル) での評価結果も併記。
+            ${_state.cvFolds}-Fold 交差検証スコア（foldごとに前処理をfit、参考値）でソートしています。テストデータ (${yTest.length} サンプル) での評価結果も併記。
         </p>
         <div class="table-container">
             <table class="table model-comparison-table">
@@ -451,8 +459,8 @@ function showModelDetail(container, result, yTest, featureNames) {
         <h3><i class="fas fa-chart-bar" style="color: #d97706;"></i> ${result.name} の詳細評価</h3>
 
         <div class="metrics-grid" style="margin: 1.5rem 0;">
-            ${createMetricCard('CV R² 参考', result.cvMean, `${_state.cvFolds}-Fold 前処理後CV平均`)}
-            ${createMetricCard('CV R² 参考 std', result.cvStd, '前処理後CVの標準偏差')}
+            ${createMetricCard('CV R² 参考', result.cvMean, `${_state.cvFolds}-Fold 前処理込みCV平均`)}
+            ${createMetricCard('CV R² 参考 std', result.cvStd, '前処理込みCVの標準偏差')}
             ${createMetricCard('Test R²', result.r2, 'テストデータ決定係数')}
             ${result.adjR2 == null ? '' : createMetricCard('Adjusted R²', result.adjR2, '特徴量数を考慮したR²')}
             ${createMetricCard('MAE', result.mae, '平均絶対誤差')}
@@ -511,7 +519,7 @@ function showModelDetail(container, result, yTest, featureNames) {
         <div style="margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, #fef3c7, #fde68a); border-radius: 12px;">
             <h4><i class="fas fa-sliders-h" style="color: #d97706;"></i> tune_model - ハイパーパラメータチューニング</h4>
             <p style="color: #92400e; margin: 0.5rem 0;">
-                GridSearch CV（前処理後データでの参考値）でパラメータを最適化します。
+                GridSearch CV（foldごとに前処理をfitする参考値）でパラメータを最適化します。
                 探索範囲: ${Object.entries(PARAM_GRIDS[result.badge]).map(([k, v]) => `${k}=[${v.join(', ')}]`).join(', ')}
             </p>
             <button id="btn-tune" class="btn-analysis" style="background: #d97706; margin-top: 1rem;">
@@ -691,12 +699,17 @@ async function runTuneModel(container, result, featureNames) {
 
     try {
         const paramGrid = PARAM_GRIDS[result.badge];
-        const { bestParams, bestScore, results: gsResults } = gridSearch(
+        const { bestParams, bestScore, results: gsResults } = gridSearchWithPreprocessing(
             result.cls,
             paramGrid,
-            _state.XTrain,
-            _state.yTrain,
-            { cv: _state.cvFolds, scoring: 'r2' }
+            _state.trainRows,
+            _state.targetCol,
+            {
+                cv: _state.cvFolds,
+                scoring: 'r2',
+                task: 'regression',
+                selectedFeatures: _state.selectedFeatures
+            }
         );
 
         // Train best model on full training data and evaluate on test
@@ -864,9 +877,13 @@ async function runCreateModel(container, featureNames) {
         model.fit(_state.XTrain, _state.yTrain);
         const yPred = model.predict(_state.XTest);
 
-        // Cross-validation
-        const cvScores = crossValidate(model, _state.XTrain, _state.yTrain, {
-            cv: _state.cvFolds, scoring: 'r2'
+        // Cross-validation with preprocessing fitted inside each fold.
+        const cvScores = crossValidateWithPreprocessing(modelDef.cls, _state.trainRows, _state.targetCol, {
+            params,
+            cv: _state.cvFolds,
+            scoring: 'r2',
+            task: 'regression',
+            selectedFeatures: _state.selectedFeatures
         });
         const cvMean = cvScores.reduce((a, b) => a + b, 0) / cvScores.length;
         const cvStd = Math.sqrt(cvScores.reduce((a, v) => a + (v - cvMean) ** 2, 0) / cvScores.length);
@@ -892,7 +909,7 @@ async function runCreateModel(container, featureNames) {
                     パラメータ: ${JSON.stringify(params)}
                 </p>
                 <div class="metrics-grid" style="margin: 1rem 0;">
-                    ${createMetricCard('CV R² 参考', cvMean, `${_state.cvFolds}-Fold 前処理後CV平均`)}
+                    ${createMetricCard('CV R² 参考', cvMean, `${_state.cvFolds}-Fold 前処理込みCV平均`)}
                     ${createMetricCard('Test R²', r2, 'テストデータ決定係数')}
                     ${createMetricCard('MAE', mae, '平均絶対誤差')}
                     ${createMetricCard('RMSE', rmse, '二乗平均平方根誤差')}
@@ -1485,7 +1502,13 @@ async function runFinalizeModel(container, result, featureNames) {
         _state.isFinalized = true;
 
         // CV score on full data for reference
-        const cvScores = crossValidate(finalModel, XFull, yFull, { cv: _state.cvFolds, scoring: 'r2' });
+        const cvScores = crossValidateWithPreprocessing(result.cls, _state.rawData, _state.targetCol, {
+            params,
+            cv: _state.cvFolds,
+            scoring: 'r2',
+            task: 'regression',
+            selectedFeatures: _state.selectedFeatures
+        });
         const cvMean = cvScores.reduce((a, b) => a + b, 0) / cvScores.length;
         const cvStd = Math.sqrt(cvScores.reduce((a, v) => a + (v - cvMean) ** 2, 0) / cvScores.length);
 
@@ -1497,8 +1520,8 @@ async function runFinalizeModel(container, result, featureNames) {
                 </p>
                 <div class="metrics-grid" style="margin: 1rem 0;">
                     ${createMetricCard('学習サンプル数', XFull.length, '訓練+テストの全データ')}
-                    ${createMetricCard('CV R² 参考', cvMean, `${_state.cvFolds}-Fold 全データCV参考`)}
-                    ${createMetricCard('CV R² 参考 std', cvStd, '全データCV参考の標準偏差')}
+                    ${createMetricCard('CV R² 参考', cvMean, `${_state.cvFolds}-Fold 全データ前処理込みCV参考`)}
+                    ${createMetricCard('CV R² 参考 std', cvStd, '全データ前処理込みCV参考の標準偏差')}
                 </div>
                 <div style="background: #f0fdf4; padding: 1rem; border-radius: 8px; border-left: 4px solid #10b981;">
                     <p style="color: #166534;">
@@ -1681,7 +1704,7 @@ function renderRegressionPerformanceDiagnostics(result, yTest) {
         <div class="model-config" style="margin-top: 1.5rem;">
             <h4><i class="fas fa-gauge-high"></i> 性能の妥当性チェック</h4>
             <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">
-                Test指標を主に見ます。CVはモデル選択の参考値ですが、現在の実装では前処理済みデータに対するCVのため、過大評価の可能性があります。
+                Test指標を主に見ます。CVはfoldごとの訓練データだけで前処理をfitする参考値ですが、最終判断では独立テスト指標も確認します。
             </p>
             <div class="table-container">
                 <table class="table">

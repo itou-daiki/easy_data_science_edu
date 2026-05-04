@@ -993,7 +993,266 @@ export function prepareTrainTestFeatures(rawData, targetCol, options = {}) {
     labelEncoder,
     preprocessInfo,
     preprocessor,
+    trainRows,
+    testRows,
   };
+}
+
+/**
+ * Fit preprocessing on a provided training fold and transform validation rows.
+ *
+ * This is used by cross-validation so that each fold learns imputation,
+ * categorical encoders, skew transforms, multicollinearity removal, and scaling
+ * from that fold's training rows only.
+ *
+ * @param {Object[]} trainRowsInput
+ * @param {Object[]} validationRowsInput
+ * @param {string} targetCol
+ * @param {Object} [options]
+ * @returns {{
+ *   XTrain: number[][],
+ *   XTest: number[][],
+ *   yTrain: Array,
+ *   yTest: Array,
+ *   featureNames: string[],
+ *   labelEncoder: LabelEncoder|null,
+ *   preprocessInfo: Object
+ * }}
+ */
+export function prepareTrainValidationFeatures(trainRowsInput, validationRowsInput, targetCol, options = {}) {
+  const {
+    imputeStrategy = 'mean',
+    scale = true,
+    selectedFeatures = null,
+    task = 'regression',
+    removeOutliers = true,
+    removeMulticollinearity = true,
+    multicollinearityThreshold = 0.95,
+    transformFeatures = true,
+    skewnessThreshold = 2.0,
+  } = options;
+
+  const trainRows = (trainRowsInput || []).filter(row =>
+    !_isMissing(row?.[targetCol]) && (task !== 'regression' || !Number.isNaN(Number(row[targetCol])))
+  );
+  const validationRows = (validationRowsInput || []).filter(row =>
+    !_isMissing(row?.[targetCol]) && (task !== 'regression' || !Number.isNaN(Number(row[targetCol])))
+  );
+  if (trainRows.length < 2 || validationRows.length === 0) {
+    throw new Error('prepareTrainValidationFeatures: fold has too few valid rows');
+  }
+
+  const headers = Object.keys(trainRows[0] || validationRows[0] || {});
+  if (!headers.includes(targetCol)) {
+    throw new Error(`prepareTrainValidationFeatures: target column "${targetCol}" not found`);
+  }
+  const initialFeatures = headers.filter(h => h !== targetCol);
+  const requestedFeatures = selectedFeatures && selectedFeatures.length > 0
+    ? initialFeatures.filter(h => selectedFeatures.includes(h))
+    : initialFeatures;
+  if (requestedFeatures.length === 0) {
+    throw new Error('prepareTrainValidationFeatures: 特徴量を1つ以上選択してください。');
+  }
+
+  const preprocessInfo = {
+    outlierRows: 0,
+    removedMulticollinear: [],
+    transformedFeatures: [],
+    droppedFeatures: [],
+    targetRowsDropped: (trainRowsInput?.length || 0) + (validationRowsInput?.length || 0) - trainRows.length - validationRows.length,
+  };
+
+  let featureNames = [...requestedFeatures];
+  featureNames = featureNames.filter(name => {
+    const hasValue = trainRows.some(row => !_isMissing(row[name]));
+    if (!hasValue) preprocessInfo.droppedFeatures.push(name);
+    return hasValue;
+  });
+  if (featureNames.length === 0) {
+    throw new Error('prepareTrainValidationFeatures: 学習に使える特徴量がありません。');
+  }
+  const fittedFeatureNames = [...featureNames];
+
+  const yRawTrain = trainRows.map(row => row[targetCol]);
+  const yRawTest = validationRows.map(row => row[targetCol]);
+  let labelEncoder = null;
+  let yTrain;
+  let yTest;
+  if (task === 'classification') {
+    const targetNumeric = yRawTrain.every(v => !Number.isNaN(Number(v)));
+    if (targetNumeric) {
+      yTrain = yRawTrain.map(Number);
+      yTest = yRawTest.map(Number);
+    } else {
+      labelEncoder = new LabelEncoder();
+      labelEncoder.fit(yRawTrain);
+      yTrain = labelEncoder.transform(yRawTrain);
+      yTest = labelEncoder.transform(yRawTest);
+    }
+  } else {
+    yTrain = yRawTrain.map(Number);
+    yTest = yRawTest.map(Number);
+  }
+
+  const numericCols = [];
+  const categoricalCols = [];
+  for (let j = 0; j < fittedFeatureNames.length; j++) {
+    const values = trainRows.map(row => row[fittedFeatureNames[j]]).filter(v => !_isMissing(v));
+    const isNumeric = values.length > 0 && values.every(v => !Number.isNaN(Number(v)));
+    if (isNumeric) numericCols.push(j);
+    else categoricalCols.push(j);
+  }
+
+  const toMatrix = (sourceRows) => sourceRows.map(row =>
+    fittedFeatureNames.map((name, j) => {
+      const val = row[name];
+      if (_isMissing(val)) return null;
+      return numericCols.includes(j) ? Number(val) : val;
+    })
+  );
+
+  let XTrain = toMatrix(trainRows);
+
+  let numericFillValues = [];
+  if (numericCols.length > 0) {
+    const numericData = XTrain.map(row => numericCols.map(j => row[j]));
+    const imputer = new SimpleImputer({ strategy: imputeStrategy });
+    const imputed = imputer.fitTransform(numericData);
+    numericFillValues = [...imputer.fillValues];
+    XTrain = XTrain.map((row, i) => {
+      const newRow = [...row];
+      numericCols.forEach((j, k) => { newRow[j] = imputed[i][k]; });
+      return newRow;
+    });
+  }
+
+  const categoricalModes = new Map();
+  const encoders = new Map();
+  if (categoricalCols.length > 0) {
+    for (const j of categoricalCols) {
+      const modeVal = _modeCategorical(XTrain.map(row => row[j])) ?? '__missing__';
+      categoricalModes.set(j, modeVal);
+      XTrain = XTrain.map(row => {
+        const next = [...row];
+        if (_isMissing(next[j])) next[j] = modeVal;
+        return next;
+      });
+    }
+  }
+
+  if (removeOutliers && numericCols.length > 0) {
+    const keepMask = Array(XTrain.length).fill(true);
+    for (const j of numericCols) {
+      const vals = XTrain.map(row => row[j]).filter(v => !_isMissing(v));
+      if (vals.length < 10) continue;
+      const sorted = [...vals].sort((a, b) => a - b);
+      const q1 = _quantile(sorted, 0.25);
+      const q3 = _quantile(sorted, 0.75);
+      const iqr = q3 - q1;
+      if (iqr === 0) continue;
+      const lower = q1 - 1.5 * iqr;
+      const upper = q3 + 1.5 * iqr;
+      for (let i = 0; i < XTrain.length; i++) {
+        const v = XTrain[i][j];
+        if (v < lower || v > upper) keepMask[i] = false;
+      }
+    }
+    const before = XTrain.length;
+    XTrain = XTrain.filter((_, i) => keepMask[i]);
+    yTrain = yTrain.filter((_, i) => keepMask[i]);
+    preprocessInfo.outlierRows = before - XTrain.length;
+  }
+
+  const transformedCols = new Set();
+  if (transformFeatures && numericCols.length > 0) {
+    for (const j of numericCols) {
+      const vals = XTrain.map(row => row[j]).filter(v => !_isMissing(v));
+      if (vals.length < 5) continue;
+      const n = vals.length;
+      const mu = vals.reduce((s, v) => s + v, 0) / n;
+      const m2 = vals.reduce((s, v) => s + (v - mu) ** 2, 0) / n;
+      const stdDev = Math.sqrt(m2);
+      if (stdDev === 0) continue;
+      const m3 = vals.reduce((s, v) => s + (v - mu) ** 3, 0) / n;
+      const skewness = m3 / stdDev ** 3;
+      if (Math.abs(skewness) > skewnessThreshold && Math.min(...vals) >= 0) {
+        transformedCols.add(j);
+        preprocessInfo.transformedFeatures.push(fittedFeatureNames[j]);
+        XTrain = XTrain.map(row => {
+          const next = [...row];
+          next[j] = Math.log1p(next[j]);
+          return next;
+        });
+      }
+    }
+  }
+
+  if (categoricalCols.length > 0) {
+    for (const j of categoricalCols) {
+      const encoder = new LabelEncoder();
+      encoder.fit(XTrain.map(row => row[j]));
+      encoders.set(j, encoder);
+    }
+    XTrain = XTrain.map(row => {
+      const next = [...row];
+      for (const j of categoricalCols) {
+        next[j] = encoders.get(j).transform([next[j]])[0];
+      }
+      return next;
+    });
+  }
+
+  XTrain = XTrain.map(row => row.map(v => Number(v)));
+
+  let keepCols = Array.from({ length: featureNames.length }, (_, i) => i);
+  if (removeMulticollinearity && XTrain.length > 0 && XTrain[0].length > 1) {
+    const remove = new Set();
+    for (let a = 0; a < XTrain[0].length; a++) {
+      if (remove.has(a)) continue;
+      for (let b = a + 1; b < XTrain[0].length; b++) {
+        if (remove.has(b)) continue;
+        const corr = _pearsonCorrelation(XTrain.map(row => row[a]), XTrain.map(row => row[b]));
+        if (Math.abs(corr) > multicollinearityThreshold) {
+          remove.add(b);
+          preprocessInfo.removedMulticollinear.push(fittedFeatureNames[b]);
+        }
+      }
+    }
+    keepCols = keepCols.filter(i => !remove.has(i));
+    XTrain = XTrain.map(row => keepCols.map(i => row[i]));
+    featureNames = keepCols.map(i => fittedFeatureNames[i]);
+  }
+
+  let scaler = null;
+  if (scale) {
+    scaler = new StandardScaler();
+    XTrain = scaler.fitTransform(XTrain);
+  }
+
+  let XTest = toMatrix(validationRows);
+  XTest = XTest.map(row => {
+    const next = [...row];
+    numericCols.forEach((j, k) => {
+      if (_isMissing(next[j]) || Number.isNaN(Number(next[j]))) next[j] = numericFillValues[k];
+      else next[j] = Number(next[j]);
+    });
+    for (const j of categoricalCols) {
+      if (_isMissing(next[j])) next[j] = categoricalModes.get(j);
+      const encoder = encoders.get(j);
+      if (encoder && !encoder.classes.includes(next[j])) next[j] = categoricalModes.get(j);
+    }
+    for (const j of transformedCols) {
+      next[j] = Math.log1p(Math.max(0, Number(next[j])));
+    }
+    for (const j of categoricalCols) {
+      const encoder = encoders.get(j);
+      if (encoder) next[j] = encoder.transform([next[j]])[0];
+    }
+    return keepCols.map(i => Number(next[i]));
+  });
+  if (scaler) XTest = scaler.transform(XTest);
+
+  return { XTrain, XTest, yTrain, yTest, featureNames, labelEncoder, preprocessInfo };
 }
 
 /**

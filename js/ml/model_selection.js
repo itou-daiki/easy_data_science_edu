@@ -16,6 +16,7 @@ import {
   precisionScore,
   recallScore,
 } from './metrics.js';
+import { prepareTrainValidationFeatures } from './preprocessing.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -489,6 +490,138 @@ export function gridSearch(ModelClass, paramGrid, X, y, options = {}) {
   results.sort((a, b) => b.meanScore - a.meanScore);
 
   return { bestParams, bestScore, results };
+}
+
+// ===========================================================================
+// Preprocessing-aware cross-validation
+// ===========================================================================
+
+/**
+ * Perform cross-validation while fitting preprocessing inside each fold.
+ *
+ * Use this for model comparison on raw row objects. The validation fold is not
+ * used to fit imputers, encoders, transformations, feature selection, or scaler.
+ *
+ * @param {Function} ModelClass - Constructor for the model
+ * @param {Object[]} rawRows - Array of row objects including target column
+ * @param {string} targetCol - Target column name
+ * @param {Object} [options]
+ * @param {Object} [options.params={}] - Model parameters
+ * @param {number} [options.cv=5] - Number of folds
+ * @param {'r2'|'accuracy'|'mse'|'neg_mse'|'mae'|'neg_mae'|'f1'|'precision'|'recall'} [options.scoring='r2']
+ * @param {boolean} [options.stratified=false] - Preserve class proportions
+ * @param {'regression'|'classification'} [options.task='regression'] - ML task
+ * @param {number} [options.randomState=42] - Fold shuffle seed
+ * @returns {number[]} Array of scores, one per fold
+ */
+export function crossValidateWithPreprocessing(ModelClass, rawRows, targetCol, options = {}) {
+  const {
+    params = {},
+    cv = 5,
+    scoring = 'r2',
+    stratified = false,
+    task = stratified ? 'classification' : 'regression',
+    randomState = 42,
+  } = options;
+
+  if (typeof ModelClass !== 'function') {
+    throw new Error('crossValidateWithPreprocessing: ModelClass must be a constructor function');
+  }
+  const rows = _filterModelRows(rawRows, targetCol, task);
+  if (rows.length === 0) {
+    throw new Error('crossValidateWithPreprocessing: no valid rows');
+  }
+
+  const yForSplit = rows.map(row => row[targetCol]);
+  const splitter = stratified
+    ? new StratifiedKFold({ nSplits: cv, shuffle: true, randomState })
+    : new KFold({ nSplits: cv, shuffle: true, randomState });
+  const folds = stratified ? splitter.split(rows, yForSplit) : splitter.split(rows);
+  const scorer = _getScorer(scoring);
+  const scores = [];
+
+  for (const [trainIdx, testIdx] of folds) {
+    const trainRows = _selectByIndices(rows, trainIdx);
+    const validationRows = _selectByIndices(rows, testIdx);
+    const { XTrain, XTest, yTrain, yTest } = prepareTrainValidationFeatures(
+      trainRows,
+      validationRows,
+      targetCol,
+      { ...options, task }
+    );
+
+    const model = new ModelClass(params);
+    model.fit(XTrain, yTrain);
+    const yPred = model.predict(XTest);
+    scores.push(scorer(yTest, yPred));
+  }
+
+  return scores;
+}
+
+/**
+ * Exhaustive grid search with preprocessing fitted inside each CV fold.
+ *
+ * @param {Function} ModelClass - Constructor for the model
+ * @param {Object<string, Array<*>>} paramGrid - Parameter name -> candidate values
+ * @param {Object[]} rawRows - Array of row objects including target column
+ * @param {string} targetCol - Target column name
+ * @param {Object} [options]
+ * @returns {{
+ *   bestParams: Object,
+ *   bestScore: number,
+ *   results: Array<{ params: Object, meanScore: number, scores: number[] }>
+ * }}
+ */
+export function gridSearchWithPreprocessing(ModelClass, paramGrid, rawRows, targetCol, options = {}) {
+  if (typeof ModelClass !== 'function') {
+    throw new Error('gridSearchWithPreprocessing: ModelClass must be a constructor function');
+  }
+
+  const paramNames = Object.keys(paramGrid);
+  const paramValues = paramNames.map((k) => paramGrid[k]);
+  const combinations = _cartesianProduct(paramValues);
+
+  let bestScore = -Infinity;
+  let bestParams = null;
+  const results = [];
+
+  for (const combo of combinations) {
+    const params = {};
+    paramNames.forEach((name, i) => {
+      params[name] = combo[i];
+    });
+
+    const scores = crossValidateWithPreprocessing(ModelClass, rawRows, targetCol, {
+      ...options,
+      params
+    });
+    const meanScore = scores.reduce((s, v) => s + v, 0) / scores.length;
+
+    results.push({ params: { ...params }, meanScore, scores: [...scores] });
+
+    if (meanScore > bestScore) {
+      bestScore = meanScore;
+      bestParams = { ...params };
+    }
+  }
+
+  results.sort((a, b) => b.meanScore - a.meanScore);
+
+  return { bestParams, bestScore, results };
+}
+
+function _filterModelRows(rawRows, targetCol, task) {
+  if (!Array.isArray(rawRows) || rawRows.length === 0) {
+    throw new Error('crossValidateWithPreprocessing: rawRows must be a non-empty array');
+  }
+  return rawRows.filter(row => {
+    const value = row?.[targetCol];
+    if (value == null || Number.isNaN(value) || (typeof value === 'string' && value.trim() === '')) {
+      return false;
+    }
+    return task !== 'regression' || !Number.isNaN(Number(value));
+  });
 }
 
 /**

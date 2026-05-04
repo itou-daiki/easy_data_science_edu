@@ -1,32 +1,35 @@
-# Iteration 15: 分析信頼性チェックとAI送信説明の改善
+# Iteration 16: 前処理込み交差検証への修正
 
 ## 目標
-easyDataScience の教育用AutoMLとしての意図に合わせ、回帰・分類の結果を学習者が過信せず読めるように、データ品質・評価妥当性・リーク候補を明示する共通チェックを追加する。Gemini支援を有効にした場合の外部送信内容もUIとマニュアルで明確にする。
+回帰・分類の比較、作成、チューニング、ファイナライズ時のCVで、欠損補完、変換、エンコード、特徴量選択、標準化をfoldごとの訓練データだけでfitし、検証foldからの前処理リークを防ぐ。
 
 ## タスク
 
-- [x] 1. 回帰・分類のセットアップ、前処理、結果表示の挿入位置を確認する
-- [x] 2. 共通の分析信頼性チェックヘルパーを追加する
-- [x] 3. 回帰の前処理後サマリと詳細評価に信頼性チェックを表示する
-- [x] 4. 分類の前処理後サマリと詳細評価に信頼性チェックを表示する
-- [x] 5. Gemini支援の送信内容・プライバシー説明をUIとマニュアルへ反映する
-- [x] 6. 静的チェック、差分レビュー、必要な修正を行う
-- [x] 7. コミットしてプッシュする
+- [x] 1. 既存の前処理パイプラインとCV/GridSearchの境界を確認する
+- [x] 2. fold指定の訓練/検証行に対して前処理をfit/transformする関数を追加する
+- [x] 3. 前処理込みCVと前処理込みGridSearchを追加する
+- [x] 4. 回帰のcompare/create/tune/finalize CVを前処理込みCVへ切り替える
+- [x] 5. 分類のcompare/create/tune/finalize CVを前処理込みCVへ切り替える
+- [x] 6. 画面文言と信頼性チェックの説明を更新する
+- [x] 7. 静的チェック、簡易実行確認、差分レビューを行う
+- [x] 8. コミットしてプッシュする
 
 ## 成功基準
 
-- 回帰・分類の分析開始後に、サンプル数、特徴量数、欠損率、目的変数、CV設定、リーク候補が確認できる
-- 詳細評価で、CVとTestの乖離、ベースライン比較、CV参考値の注意が表示される
-- Gemini支援を有効にした場合のみ、先頭行・要約統計量・主要指標などの分析文脈がGoogle Gemini APIへ送信されることが明記される
-- `node --check` と `git diff --check` が通る
+- CVの各foldで前処理が訓練foldだけにfitされる
+- 回帰・分類の比較順位とチューニングが新しいCV経路を使う
+- 画面上のCV説明が「前処理後データCV」ではなく「前処理込みCV」になっている
+- `node --check`、ES module import確認、簡易CV実行確認、`git diff --check` が通る
 
 ## レビュー
 
-- `js/analysis_quality.js` を追加し、サンプル数、特徴量数、欠損率、目的変数の分布、リーク/ID候補、CV fold、外れ値除去、ベースライン比較、CVとTestの乖離を共通ロジックで判定できるようにした。
-- 回帰の前処理後サマリに「分析前の信頼性チェック」、詳細評価に「評価信頼性チェック」を追加した。
-- 分類の前処理後サマリに「分析前の信頼性チェック」、詳細評価に「評価信頼性チェック」を追加した。
-- Gemini支援設定モーダル、フローティングパネル、使い方マニュアルに、送信タイミングと送信内容を明記した。
-- `node --check js/analysis_quality.js`、`node --check js/analyses/regression.js`、`node --check js/analyses/classification.js`、`node --check js/ai_assistant.js` は成功。
-- `node --input-type=module` で回帰・分類モジュールのimport確認は警告のみで成功。
+- `prepareTrainValidationFeatures()` を追加し、指定されたfoldの訓練行だけで欠損補完、カテゴリエンコード、外れ値除去、特徴量変換、多重共線性除去、標準化をfitし、検証行へtransformできるようにした。
+- `crossValidateWithPreprocessing()` と `gridSearchWithPreprocessing()` を追加し、raw row単位でfold分割してから各fold内で前処理をfitする経路を作った。
+- 回帰のcompare/create/tune/finalizeのCVを前処理込みCVへ切り替えた。
+- 分類のcompare/create/tune/finalizeのCVを前処理込みCVへ切り替えた。
+- 信頼性チェック、画面文言、使い方マニュアルから「前処理後データCV」の注意を外し、「foldごとの訓練データだけで前処理をfitするCV」に更新した。
+- `node --check js/ml/preprocessing.js`、`node --check js/ml/model_selection.js`、`node --check js/analyses/regression.js`、`node --check js/analyses/classification.js`、`node --check js/analysis_quality.js` は成功。
+- ES module import確認は警告のみで成功。
+- デモCSVを使った前処理込みCVと前処理込みGridSearchの簡易実行確認は成功。
 - `git diff --check` は成功。
-- 残リスク: Playwrightパッケージがこの作業環境からimportできず、ヘッドレスブラウザの操作確認は未実施。前処理込みCVと乱数seedの根本対応は次の実装課題として残る。
+- 残リスク: スタッキングのOOFメタ特徴量生成は、まだ保持訓練データ全体でfit済みの前処理行列を使っている。比較・チューニングのCVリークは解消したが、スタッキングは次の改善候補。

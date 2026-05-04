@@ -52,9 +52,9 @@ export function buildAnalysisQualityReport(options = {}) {
     checkResult(add, task, result);
 
     add(
-        'warning',
-        'CVは前処理後データでの参考値',
-        '現在の比較処理では、欠損補完・変換・標準化などを済ませた訓練データに対してCVを行います。独立テスト指標を主に確認してください。'
+        'info',
+        'CVはfold内で前処理をfit',
+        '比較・チューニングのCVでは、欠損補完・変換・エンコード・標準化をfoldごとの訓練データだけでfitします。最終判断では独立テスト指標もあわせて確認してください。'
     );
 
     const counts = items.reduce((acc, item) => {
@@ -308,7 +308,7 @@ function checkResult(add, task, result) {
     if (task === 'regression') {
         const gap = result.cvMean - result.r2;
         if (Number.isFinite(gap) && gap >= 0.3) {
-            add('danger', 'CVとTestの差が大きい', `CV R²がTest R²より${formatNumber(gap)}高いです。過学習、データ分割差、前処理CVの過大評価を疑ってください。`);
+            add('danger', 'CVとTestの差が大きい', `CV R²がTest R²より${formatNumber(gap)}高いです。過学習、データ分割差、foldごとの検証データの偏りを疑ってください。`);
         } else if (Number.isFinite(gap) && gap >= 0.15) {
             add('warning', 'CVとTestの差に注意', `CV R²がTest R²より${formatNumber(gap)}高いです。独立テスト指標を優先してください。`);
         }

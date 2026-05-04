@@ -7,7 +7,7 @@ import { buildAnalysisContext, renderAIAssistPanel } from '../ai_assistant.js';
 import { buildAnalysisQualityReport, getAnalysisQualityNotes, renderAnalysisQualityPanel } from '../analysis_quality.js';
 import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
 import { prepareTrainTestFeatures } from '../ml/preprocessing.js';
-import { StratifiedKFold, crossValidate, gridSearch, permutationImportance, learningCurve } from '../ml/model_selection.js';
+import { StratifiedKFold, crossValidateWithPreprocessing, gridSearchWithPreprocessing, permutationImportance, learningCurve } from '../ml/model_selection.js';
 import { accuracy, precisionScore, recallScore, f1Score, confusionMatrix, logLoss, rocAucScore } from '../ml/metrics.js';
 import { LogisticRegression } from '../ml/classification/logistic.js';
 import { DecisionTreeClassifier } from '../ml/classification/decision_tree.js';
@@ -199,7 +199,7 @@ async function runComparison(container, data, characteristics) {
     try {
         const {
             XTrain, XTest, yTrain, yTest,
-            featureNames, labelEncoder, encoders, scaler, preprocessInfo, preprocessor
+            featureNames, labelEncoder, encoders, scaler, preprocessInfo, preprocessor, trainRows, testRows
         } = prepareTrainTestFeatures(data, targetCol, {
             selectedFeatures,
             task: 'classification',
@@ -226,6 +226,8 @@ async function runComparison(container, data, characteristics) {
             targetCol,
             selectedFeatures,
             preprocessInfo,
+            trainRows,
+            testRows,
             fileName: characteristics.fileName || 'data',
             rawData: data,
             characteristics
@@ -318,8 +320,15 @@ async function runComparison(container, data, characteristics) {
                 const yPred = model.predict(XTest);
                 const yProba = model.predictProba ? model.predictProba(XTest) : null;
 
-                // Cross-validation on training data
-                const cvScores = crossValidate(model, XTrain, yTrain, { cv: _state.cvFolds, scoring: 'f1', stratified: true });
+                // Cross-validation with preprocessing fitted inside each fold.
+                const cvScores = crossValidateWithPreprocessing(modelDef.cls, _state.trainRows, _state.targetCol, {
+                    params: modelDef.params,
+                    cv: _state.cvFolds,
+                    scoring: 'f1',
+                    stratified: true,
+                    task: 'classification',
+                    selectedFeatures: _state.selectedFeatures
+                });
                 const cvMean = cvScores.reduce((a, b) => a + b, 0) / cvScores.length;
                 const cvStd = Math.sqrt(cvScores.reduce((a, v) => a + (v - cvMean) ** 2, 0) / cvScores.length);
 
@@ -384,7 +393,7 @@ function renderComparisonResults(container, results, yTest, featureNames, classe
     let html = `
         <h3 style="margin-top: 1rem;"><i class="fas fa-trophy" style="color: #0891b2;"></i> モデル比較結果</h3>
         <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-            ${_state.cvFolds}-Fold 交差検証スコア（前処理後の訓練データ、参考値）でソートしています。テストデータ (${yTest.length} サンプル) での評価結果も併記。
+            ${_state.cvFolds}-Fold 交差検証スコア（foldごとに前処理をfit、参考値）でソートしています。テストデータ (${yTest.length} サンプル) での評価結果も併記。
         </p>
         <div class="table-container">
             <table class="table model-comparison-table">
@@ -499,8 +508,8 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
         <h3><i class="fas fa-chart-bar" style="color: #0891b2;"></i> ${result.name} の詳細評価</h3>
 
         <div class="metrics-grid" style="margin: 1.5rem 0;">
-            ${createMetricCard('CV F1 参考', result.cvMean, `${_state.cvFolds}-Fold 前処理後CV平均`)}
-            ${createMetricCard('CV F1 参考 std', result.cvStd, '前処理後CVの標準偏差')}
+            ${createMetricCard('CV F1 参考', result.cvMean, `${_state.cvFolds}-Fold 前処理込みCV平均`)}
+            ${createMetricCard('CV F1 参考 std', result.cvStd, '前処理込みCVの標準偏差')}
             ${createMetricCard('Accuracy', result.acc, '正解率')}
             ${createMetricCard('Macro Precision', result.prec, 'クラス平均の適合率')}
             ${createMetricCard('Macro Recall', result.rec, 'クラス平均の再現率')}
@@ -561,7 +570,7 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
         <div style="margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, #cffafe, #a5f3fc); border-radius: 12px;">
             <h4><i class="fas fa-sliders-h" style="color: #0891b2;"></i> tune_model - ハイパーパラメータチューニング</h4>
             <p style="color: #164e63; margin: 0.5rem 0;">
-                GridSearch CV（前処理後データでの参考値）でパラメータを最適化します。
+                GridSearch CV（foldごとに前処理をfitする参考値）でパラメータを最適化します。
                 探索範囲: ${Object.entries(PARAM_GRIDS[result.badge]).map(([k, v]) => `${k}=[${v.join(', ')}]`).join(', ')}
             </p>
             <button id="btn-tune" class="btn-analysis" style="background: #0891b2; margin-top: 1rem;">
@@ -792,7 +801,14 @@ async function runCreateModel(container, featureNames, classes, classLabels) {
         const yPred = model.predict(_state.XTest);
         const yProba = model.predictProba ? model.predictProba(_state.XTest) : null;
 
-        const cvScores = crossValidate(model, _state.XTrain, _state.yTrain, { cv: _state.cvFolds, scoring: 'f1', stratified: true });
+        const cvScores = crossValidateWithPreprocessing(modelDef.cls, _state.trainRows, _state.targetCol, {
+            params: mergedParams,
+            cv: _state.cvFolds,
+            scoring: 'f1',
+            stratified: true,
+            task: 'classification',
+            selectedFeatures: _state.selectedFeatures
+        });
         const cvMean = cvScores.reduce((a, b) => a + b, 0) / cvScores.length;
 
         const acc = accuracy(_state.yTest, yPred);
@@ -821,7 +837,7 @@ async function runCreateModel(container, featureNames, classes, classLabels) {
                     パラメータ: ${JSON.stringify(mergedParams)}
                 </p>
                 <div class="metrics-grid" style="margin: 1rem 0;">
-                    ${createMetricCard('CV F1 参考', cvMean, `${_state.cvFolds}-Fold 前処理後CV`)}
+                    ${createMetricCard('CV F1 参考', cvMean, `${_state.cvFolds}-Fold 前処理込みCV`)}
                     ${createMetricCard('Accuracy', acc, '正解率')}
                     ${createMetricCard('F1 Score', f1, 'F1スコア')}
                     ${createMetricCard('Precision', prec, '適合率')}
@@ -860,12 +876,18 @@ async function runTuneModel(container, result, featureNames, classes, classLabel
 
     try {
         const paramGrid = PARAM_GRIDS[result.badge];
-        const { bestParams, bestScore, results: gsResults } = gridSearch(
+        const { bestParams, bestScore, results: gsResults } = gridSearchWithPreprocessing(
             result.cls,
             paramGrid,
-            _state.XTrain,
-            _state.yTrain,
-            { cv: _state.cvFolds, scoring: 'f1', stratified: true }
+            _state.trainRows,
+            _state.targetCol,
+            {
+                cv: _state.cvFolds,
+                scoring: 'f1',
+                stratified: true,
+                task: 'classification',
+                selectedFeatures: _state.selectedFeatures
+            }
         );
 
         // Train best model on full training data and evaluate on test
@@ -1620,7 +1642,14 @@ async function runFinalizeModel(container, result, featureNames) {
         _state.finalizedModel = finalModel;
         _state.isFinalized = true;
 
-        const cvScores = crossValidate(finalModel, XFull, yFull, { cv: _state.cvFolds, scoring: 'f1', stratified: true });
+        const cvScores = crossValidateWithPreprocessing(result.cls, _state.rawData, _state.targetCol, {
+            params,
+            cv: _state.cvFolds,
+            scoring: 'f1',
+            stratified: true,
+            task: 'classification',
+            selectedFeatures: _state.selectedFeatures
+        });
         const cvMean = cvScores.reduce((a, b) => a + b, 0) / cvScores.length;
         const cvStd = Math.sqrt(cvScores.reduce((a, v) => a + (v - cvMean) ** 2, 0) / cvScores.length);
 
@@ -1632,8 +1661,8 @@ async function runFinalizeModel(container, result, featureNames) {
                 </p>
                 <div class="metrics-grid" style="margin: 1rem 0;">
                     ${createMetricCard('学習サンプル数', XFull.length, '訓練+テストの全データ')}
-                    ${createMetricCard('CV F1 参考', cvMean, `${_state.cvFolds}-Fold 全データCV参考`)}
-                    ${createMetricCard('CV F1 参考 std', cvStd, '全データCV参考の標準偏差')}
+                    ${createMetricCard('CV F1 参考', cvMean, `${_state.cvFolds}-Fold 全データ前処理込みCV参考`)}
+                    ${createMetricCard('CV F1 参考 std', cvStd, '全データ前処理込みCV参考の標準偏差')}
                 </div>
                 <div style="background: #f0fdf4; padding: 1rem; border-radius: 8px; border-left: 4px solid #10b981;">
                     <p style="color: #166534;">
@@ -1849,7 +1878,7 @@ function renderClassificationPerformanceDiagnostics(result, yTest, classLabels) 
             <h4><i class="fas fa-gauge-high"></i> 性能の妥当性チェック</h4>
             <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">
                 Accuracyだけでなく、クラス平均のPrecision/Recall/F1と多数派クラスだけを予測するベースラインとの差を確認します。
-                CVは現在の実装では前処理済みデータに対する参考値のため、Test指標と混同行列を重視してください。
+                CVはfoldごとの訓練データだけで前処理をfitする参考値です。Test指標、混同行列、クラス別指標も重視してください。
             </p>
             <div class="table-container">
                 <table class="table">
