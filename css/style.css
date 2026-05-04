@@ -538,12 +538,27 @@ table tr:hover { background: var(--background); }
     font-size: 0.8rem; line-height: 1.5;
 }
 .ai-assist-privacy-note i { margin-top: 0.1rem; color: #d97706; }
+.ai-assist-actions {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;
+}
+.ai-assist-copy,
 .ai-assist-generate {
     width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
     border-radius: 8px; padding: 0.75rem 1rem; font-weight: 700;
+    border: 1px solid transparent;
 }
+.ai-assist-copy {
+    background: #f8fafc; color: #1e3a8a; border-color: #bfdbfe;
+}
+.ai-assist-copy:hover { background: #eff6ff; }
 .ai-assist-generate:disabled {
-    opacity: 0.65; cursor: wait;
+    opacity: 0.65; cursor: not-allowed;
+}
+.ai-assist-copy:disabled {
+    opacity: 0.65; cursor: not-allowed;
+}
+.ai-assist-generate.is-loading:disabled {
+    cursor: wait;
 }
 .ai-assist-output {
     margin-top: 0.85rem; padding: 0.9rem; border-radius: 8px; min-height: 8rem;

@@ -146,6 +146,21 @@ export function render(container, data, characteristics) {
     });
 
     btnCompare.addEventListener('click', () => runComparison(container, data, characteristics));
+
+    renderAIAssistPanel({
+        context: buildAnalysisContext({
+            data,
+            characteristics,
+            method: '回帰モデル比較 (AutoML)',
+            resultSummary: {
+                status: '目的変数未選択',
+                requiredAction: '目的変数を選択し、モデル比較を実行してください。'
+            },
+            notes: ['目的変数と特徴量を選択して分析結果を生成すると、AI用テキストをコピーできます。']
+        }),
+        ready: false,
+        unavailableReason: '目的変数を選択し、モデル比較を実行するとAI用テキストをコピーできます。'
+    });
 }
 
 async function runComparison(container, data, characteristics) {

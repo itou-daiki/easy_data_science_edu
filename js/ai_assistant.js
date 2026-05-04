@@ -123,8 +123,13 @@ export function buildAnalysisContext({ data, characteristics, method, resultSumm
     };
 }
 
-export function renderAIAssistPanel({ context, title = '生成AI解釈補助' }) {
-    lastPanelRequest = { context, title };
+export function renderAIAssistPanel({
+    context,
+    title = '生成AI解釈補助',
+    ready = true,
+    unavailableReason = '分析に使う変数を選択し、結果を生成すると利用できます。'
+}) {
+    lastPanelRequest = { context, title, ready, unavailableReason };
 
     removeAIAssistPanel();
     if (!isAIAssistActive() || !context) return;
@@ -158,11 +163,16 @@ export function renderAIAssistPanel({ context, title = '生成AI解釈補助' })
                 <i class="fas fa-lock"></i>
                 <span>実行時、この要約文脈が Google Gemini API へ送信されます。アップロードファイル全体は送信しません。</span>
             </div>
-            <button type="button" class="ai-assist-generate">
-                <i class="fas fa-lightbulb"></i> 解釈を生成
-            </button>
+            <div class="ai-assist-actions">
+                <button type="button" class="ai-assist-copy" ${ready ? '' : 'disabled'} title="${ready ? 'AIに貼り付けるための文脈をコピー' : escapeHtml(unavailableReason)}">
+                    <i class="fas fa-copy"></i> AI用テキストをコピー
+                </button>
+                <button type="button" class="ai-assist-generate" ${ready ? '' : 'disabled'} title="${ready ? 'Geminiで解釈を生成' : escapeHtml(unavailableReason)}">
+                    <i class="fas fa-lightbulb"></i> 解釈を生成
+                </button>
+            </div>
             <div class="ai-assist-output" aria-live="polite">
-                分析結果の表や指標を踏まえて、初学者向けに要点を整理します。
+                ${ready ? '分析結果の表や指標を踏まえて、初学者向けに要点を整理します。' : escapeHtml(unavailableReason)}
             </div>
         </div>
     `;
@@ -171,6 +181,7 @@ export function renderAIAssistPanel({ context, title = '生成AI解釈補助' })
 
     const body = panel.querySelector('.ai-assist-body');
     const output = panel.querySelector('.ai-assist-output');
+    const copyButton = panel.querySelector('.ai-assist-copy');
     const generateButton = panel.querySelector('.ai-assist-generate');
 
     panel.querySelector('[data-action="close"]').addEventListener('click', () => {
@@ -183,8 +194,30 @@ export function renderAIAssistPanel({ context, title = '生成AI解釈補助' })
         panel.querySelector('[data-action="collapse"] i').className = collapsed ? 'fas fa-plus' : 'fas fa-minus';
     });
 
+    copyButton.addEventListener('click', async () => {
+        if (!ready) return;
+
+        const originalHtml = copyButton.innerHTML;
+        copyButton.disabled = true;
+        try {
+            await copyTextToClipboard(buildPrompt(context));
+            copyButton.innerHTML = '<i class="fas fa-check"></i> コピーしました';
+            output.textContent = 'AI用テキストをクリップボードにコピーしました。外部AIに貼り付けて利用できます。';
+        } catch {
+            output.textContent = 'クリップボードへのコピーに失敗しました。ブラウザの権限設定を確認してください。';
+        } finally {
+            setTimeout(() => {
+                copyButton.innerHTML = originalHtml;
+                copyButton.disabled = false;
+            }, 1600);
+        }
+    });
+
     generateButton.addEventListener('click', async () => {
+        if (!ready) return;
+
         generateButton.disabled = true;
+        generateButton.classList.add('is-loading');
         output.textContent = 'Gemini に解釈を依頼しています...';
 
         try {
@@ -194,6 +227,7 @@ export function renderAIAssistPanel({ context, title = '生成AI解釈補助' })
             output.textContent = error.message;
         } finally {
             generateButton.disabled = false;
+            generateButton.classList.remove('is-loading');
         }
     });
 }
@@ -206,6 +240,28 @@ export function removeAIAssistPanel() {
 export function clearAIAssistPanelContext() {
     lastPanelRequest = null;
     removeAIAssistPanel();
+}
+
+async function copyTextToClipboard(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    textarea.style.top = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+
+    const copied = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    if (!copied) {
+        throw new Error('copy failed');
+    }
 }
 
 async function requestGeminiInterpretation(context) {
