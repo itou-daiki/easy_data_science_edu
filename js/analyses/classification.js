@@ -6,7 +6,7 @@ import { createSelect, createStepIndicator, formatNumber, renderPlot, renderConf
 import { buildAnalysisContext, renderAIAssistPanel } from '../ai_assistant.js';
 import { buildAnalysisQualityReport, getAnalysisQualityNotes, renderAnalysisQualityPanel } from '../analysis_quality.js';
 import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
-import { prepareTrainTestFeatures } from '../ml/preprocessing.js';
+import { prepareTrainTestFeatures, prepareTrainValidationFeatures } from '../ml/preprocessing.js';
 import { StratifiedKFold, crossValidateWithPreprocessing, gridSearchWithPreprocessing, permutationImportance, learningCurve } from '../ml/model_selection.js';
 import { accuracy, precisionScore, recallScore, f1Score, confusionMatrix, logLoss, rocAucScore } from '../ml/metrics.js';
 import { LogisticRegression } from '../ml/classification/logistic.js';
@@ -1447,23 +1447,31 @@ async function runStackModels(container, featureNames, classes, classLabels) {
 
         // Build out-of-fold stacked features so the meta learner never sees
         // in-sample base predictions.
+        const stackRows = _state.trainRows || [];
+        const stackTargets = stackRows.map(row => _state.labelEncoder
+            ? _state.labelEncoder.transform([row[_state.targetCol]])[0]
+            : Number(row[_state.targetCol])
+        );
         const featureWidth = topModels.length * classes.length;
         const stackedTrainFeatures = Array.from(
-            { length: _state.XTrain.length },
+            { length: stackRows.length },
             () => new Array(featureWidth).fill(0)
         );
         const skf = new StratifiedKFold({ nSplits: _state.cvFolds, shuffle: true, randomState: 42 });
-        for (const [foldTrainIdx, foldValidIdx] of skf.split(_state.XTrain, _state.yTrain)) {
-            const foldXTrain = foldTrainIdx.map(i => _state.XTrain[i]);
-            const foldYTrain = foldTrainIdx.map(i => _state.yTrain[i]);
-            const foldXValid = foldValidIdx.map(i => _state.XTrain[i]);
+        for (const [foldTrainIdx, foldValidIdx] of skf.split(stackRows, stackTargets)) {
+            const foldTrainRows = foldTrainIdx.map(i => stackRows[i]);
+            const foldValidRows = foldValidIdx.map(i => stackRows[i]);
+            const foldData = prepareTrainValidationFeatures(foldTrainRows, foldValidRows, _state.targetCol, {
+                task: 'classification',
+                selectedFeatures: _state.selectedFeatures
+            });
             topModels.forEach((mr, modelIdx) => {
                 const params = mr.model.getParams ? mr.model.getParams() : {};
                 const foldModel = new mr.cls(params);
-                foldModel.fit(foldXTrain, foldYTrain);
+                foldModel.fit(foldData.XTrain, foldData.yTrain);
                 const foldFeatures = foldModel.predictProba
-                    ? foldModel.predictProba(foldXValid)
-                    : foldModel.predict(foldXValid).map(pred => classes.map(c => c === pred ? 1 : 0));
+                    ? foldModel.predictProba(foldData.XTest).map(proba => alignProbabilities(proba, foldModel.classes, classes))
+                    : foldModel.predict(foldData.XTest).map(pred => classes.map(c => c === pred ? 1 : 0));
                 foldValidIdx.forEach((originalIdx, rowIdx) => {
                     const offset = modelIdx * classes.length;
                     for (let c = 0; c < classes.length; c++) {
@@ -1480,7 +1488,7 @@ async function runStackModels(container, featureNames, classes, classLabels) {
                 const sampleInput = [_state.XTest[sampleIdx]];
                 if (mr.model.predictProba) {
                     const proba = mr.model.predictProba(sampleInput);
-                    features.push(...proba[0]);
+                    features.push(...alignProbabilities(proba[0], mr.model.classes, classes));
                 } else {
                     const pred = mr.model.predict(sampleInput)[0];
                     const oneHot = classes.map(c => c === pred ? 1 : 0);
@@ -1492,7 +1500,7 @@ async function runStackModels(container, featureNames, classes, classLabels) {
 
         // Train meta-learner (LogisticRegression) on stacked features
         const metaLearner = new LogisticRegression({ maxIter: 1000 });
-        metaLearner.fit(stackedTrainFeatures, _state.yTrain);
+        metaLearner.fit(stackedTrainFeatures, stackTargets);
 
         // Evaluate on test data
         const stackedPred = metaLearner.predict(stackedTestFeatures);
@@ -1513,7 +1521,7 @@ async function runStackModels(container, featureNames, classes, classLabels) {
                     for (const bm of this.baseModels) {
                         if (bm.predictProba) {
                             const proba = bm.predictProba([row]);
-                            features.push(...proba[0]);
+                            features.push(...alignProbabilities(proba[0], bm.classes, this._classes));
                         } else {
                             const pred = bm.predict([row])[0];
                             const oneHot = this._classes.map(c => c === pred ? 1 : 0);
@@ -1530,7 +1538,7 @@ async function runStackModels(container, featureNames, classes, classLabels) {
                     for (const bm of this.baseModels) {
                         if (bm.predictProba) {
                             const proba = bm.predictProba([row]);
-                            features.push(...proba[0]);
+                            features.push(...alignProbabilities(proba[0], bm.classes, this._classes));
                         } else {
                             const pred = bm.predict([row])[0];
                             const oneHot = this._classes.map(c => c === pred ? 1 : 0);
@@ -1550,7 +1558,7 @@ async function runStackModels(container, featureNames, classes, classLabels) {
             <div style="background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1rem;">
                 <h4>スタッキング結果 (上位 ${topN} モデル + LogisticRegression メタ学習器)</h4>
                 <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-                    ベースモデル: ${topModels.map(m => m.badge).join(', ')} / メタ学習器: LogisticRegression / Out-of-Fold予測で学習
+                    ベースモデル: ${topModels.map(m => m.badge).join(', ')} / メタ学習器: LogisticRegression / foldごとに前処理をfitしたOut-of-Fold予測で学習
                 </p>
                 <div class="table-container">
                     <table class="table">
@@ -1615,6 +1623,16 @@ async function runStackModels(container, featureNames, classes, classLabels) {
     }
 
     btnStack.disabled = false;
+}
+
+function alignProbabilities(proba, sourceClasses, targetClasses) {
+    if (!Array.isArray(sourceClasses) || sourceClasses.length !== proba.length) {
+        return targetClasses.map((_, idx) => proba[idx] || 0);
+    }
+    return targetClasses.map(cls => {
+        const idx = sourceClasses.indexOf(cls);
+        return idx === -1 ? 0 : (proba[idx] || 0);
+    });
 }
 
 async function runFinalizeModel(container, result, featureNames) {

@@ -6,7 +6,7 @@ import { createSelect, createStepIndicator, formatNumber, renderPlot, renderActu
 import { buildAnalysisContext, renderAIAssistPanel } from '../ai_assistant.js';
 import { buildAnalysisQualityReport, getAnalysisQualityNotes, renderAnalysisQualityPanel } from '../analysis_quality.js';
 import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
-import { prepareTrainTestFeatures } from '../ml/preprocessing.js';
+import { prepareTrainTestFeatures, prepareTrainValidationFeatures } from '../ml/preprocessing.js';
 import { KFold, crossValidateWithPreprocessing, gridSearchWithPreprocessing, permutationImportance, learningCurve } from '../ml/model_selection.js';
 import { meanAbsoluteError, meanSquaredError, rootMeanSquaredError, rSquared, adjustedRSquared } from '../ml/metrics.js';
 import { LinearRegression } from '../ml/regression/linear.js';
@@ -1323,20 +1323,25 @@ async function runStackModels(container, featureNames) {
 
         // Generate out-of-fold meta-features to avoid training the meta model on
         // in-sample base predictions.
+        const stackRows = _state.trainRows || [];
+        const metaTrainTargets = stackRows.map(row => Number(row[_state.targetCol]));
         const metaTrainFeatures = Array.from(
-            { length: _state.XTrain.length },
+            { length: stackRows.length },
             () => new Array(baseModels.length).fill(0)
         );
-        const kf = new KFold({ nSplits: Math.min(_state.cvFolds, _state.XTrain.length), shuffle: true, randomState: 42 });
-        for (const [foldTrainIdx, foldValidIdx] of kf.split(_state.XTrain)) {
-            const foldXTrain = foldTrainIdx.map(i => _state.XTrain[i]);
-            const foldYTrain = foldTrainIdx.map(i => _state.yTrain[i]);
-            const foldXValid = foldValidIdx.map(i => _state.XTrain[i]);
+        const kf = new KFold({ nSplits: Math.min(_state.cvFolds, stackRows.length), shuffle: true, randomState: 42 });
+        for (const [foldTrainIdx, foldValidIdx] of kf.split(stackRows)) {
+            const foldTrainRows = foldTrainIdx.map(i => stackRows[i]);
+            const foldValidRows = foldValidIdx.map(i => stackRows[i]);
+            const foldData = prepareTrainValidationFeatures(foldTrainRows, foldValidRows, _state.targetCol, {
+                task: 'regression',
+                selectedFeatures: _state.selectedFeatures
+            });
             baseModels.forEach((m, modelIdx) => {
                 const params = m.model.getParams ? m.model.getParams() : {};
                 const foldModel = new m.cls(params);
-                foldModel.fit(foldXTrain, foldYTrain);
-                const foldPred = foldModel.predict(foldXValid);
+                foldModel.fit(foldData.XTrain, foldData.yTrain);
+                const foldPred = foldModel.predict(foldData.XTest);
                 foldValidIdx.forEach((originalIdx, i) => {
                     metaTrainFeatures[originalIdx][modelIdx] = foldPred[i];
                 });
@@ -1345,7 +1350,7 @@ async function runStackModels(container, featureNames) {
 
         // Train meta-learner (LinearRegression) on base model predictions
         const metaLearner = new LinearRegression();
-        metaLearner.fit(metaTrainFeatures, _state.yTrain);
+        metaLearner.fit(metaTrainFeatures, metaTrainTargets);
 
         // Generate meta-features for test data
         const metaTestFeatures = _state.XTest.map(row => {
@@ -1389,7 +1394,7 @@ async function runStackModels(container, featureNames) {
             <div style="background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1rem;">
                 <h4>スタッキング結果 (上位 ${topN} モデル → LinearRegression メタモデル)</h4>
                 <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-                    ベースモデル: ${baseModels.map(m => m.badge).join(', ')} → Out-of-Fold予測でメタモデルを学習
+                    ベースモデル: ${baseModels.map(m => m.badge).join(', ')} → foldごとに前処理をfitしたOut-of-Fold予測でメタモデルを学習
                 </p>
 
                 ${metaCoeffs.length > 0 ? `

@@ -1,36 +1,34 @@
-# Iteration 17: 乱数モデルの再現性対応
+# Iteration 18: スタッキングOOFの前処理リーク修正
 
 ## 目標
-RandomForest、GradientBoosting、SVMなど乱数を使うモデルで `Math.random()` への直接依存をなくし、`randomState` を指定すれば同じデータ・同じ設定で同じ結果になるようにする。
+回帰・分類の `stack_models` でメタ学習器に渡すOut-of-Fold予測を、保持訓練データ全体でfit済みの前処理行列ではなく、foldごとの訓練データだけでfitした前処理から生成する。
 
 ## タスク
 
-- [x] 1. `Math.random()` 使用箇所と乱数モデルの `getParams()` を確認する
-- [x] 2. seed付き乱数ヘルパーを追加する
-- [x] 3. 回帰RandomForest/GradientBoostingを `randomState` 対応にする
-- [x] 4. 分類RandomForest/GradientBoosting/SVMを `randomState` 対応にする
-- [x] 5. 回帰・分類UIのモデル定義に `randomState: 42` を明示する
-- [x] 6. 静的チェックと簡易再現性テストを実施する
-- [x] 7. コミットしてプッシュする
+- [x] 1. 回帰・分類のstack実装と前処理fold関数の接続点を確認する
+- [x] 2. 回帰stackのOOFメタ特徴量をfold内前処理fitに切り替える
+- [x] 3. 分類stackのOOFメタ特徴量をfold内前処理fitに切り替える
+- [x] 4. stack結果の画面文言を前処理込みOOFに更新する
+- [x] 5. 静的チェックと簡易stack実行確認を実施する
+- [x] 6. コミットしてプッシュする
 
 ## 成功基準
 
-- `rg "Math.random" js/ml` で対象ML実装に直接利用が残らない
-- 同じ `randomState` の同一モデルを2回fitして、予測と特徴量重要度が一致する
-- 異なる `randomState` では、少なくとも乱数を使うモデルの内部サンプル/特徴量選択が変わり得る
-- `node --check`、ES module import確認、`git diff --check` が通る
+- 回帰stackのOOF生成で `_state.XTrain` をfold分割しない
+- 分類stackのOOF生成で `_state.XTrain` / `_state.yTrain` をfold分割しない
+- `prepareTrainValidationFeatures()` を使い、各foldで前処理をfitする
+- `node --check`、ES module import確認、簡易stack相当実行確認、`git diff --check` が通る
 
 ## レビュー
 
-- `js/ml/random.js` を追加し、Mulberry32ベースのseed付き乱数、整数サンプリング、Fisher-Yatesシャッフルを共通化した。
-- 回帰RandomForestのbootstrapと特徴量サンプリングを `randomState` で再現可能にした。
-- 回帰GradientBoostingのsubsampleを `randomState` で再現可能にした。
-- 分類RandomForestのbootstrapと特徴量サンプリングを `randomState` で再現可能にした。
-- 分類GradientBoostingのsubsampleを `randomState` で再現可能にした。
-- 分類SVMのSGDサンプル順を `randomState` で再現可能にした。
-- 各モデルの `getParams()` に `randomState` を含め、clone/finalize/export時にseedが落ちないようにした。
-- 回帰・分類UIの乱数モデル定義に `randomState: 42` を明示した。
-- `rg "Math.random" js/ml` で直接利用が残っていないことを確認した。
-- 対象ファイルの `node --check` とES module import確認は成功。
-- 同じseedで予測・確率・特徴量重要度が一致し、異なるseedで内部サンプリングが変わる簡易再現性テストは成功。
+- 回帰stackのOOF生成を `_state.XTrain` のfold分割から `_state.trainRows` のfold分割へ変更した。
+- 回帰stackでは各foldで `prepareTrainValidationFeatures()` を呼び、fold訓練行だけで前処理をfitしてからベースモデルの検証fold予測を生成するようにした。
+- 分類stackのOOF生成を `_state.XTrain` / `_state.yTrain` のfold分割から `_state.trainRows` とraw target由来のstack targetのfold分割へ変更した。
+- 分類stackでも各foldで `prepareTrainValidationFeatures()` を呼び、fold訓練行だけで前処理をfitするようにした。
+- 分類stackの確率特徴量は、モデルごとの `classes` をグローバルなクラス順に揃えてからメタ特徴量へ入れるようにした。
+- stack結果の画面文言を「foldごとに前処理をfitしたOut-of-Fold予測」に更新した。
+- `node --check js/analyses/regression.js` と `node --check js/analyses/classification.js` は成功。
+- ES module import確認は警告のみで成功。
+- デモCSVを使い、回帰・分類の前処理込みOOFメタ特徴量が全行・全列で数値として生成されることを確認した。
+- `_state.XTrain` をfold分割する旧stack経路が残っていないことを `rg` で確認した。
 - `git diff --check` は成功。
