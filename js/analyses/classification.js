@@ -1650,14 +1650,32 @@ async function runFinalizeModel(container, result, featureNames) {
     await new Promise(r => setTimeout(r, 100));
 
     try {
-        const XFull = [..._state.XTrain, ..._state.XTest];
-        const yFull = [..._state.yTrain, ..._state.yTest];
+        const fullPrepared = prepareTrainTestFeatures(_state.rawData, _state.targetCol, {
+            selectedFeatures: _state.selectedFeatures,
+            task: 'classification',
+            testSize: 0,
+            randomState: 42
+        });
+        const XFull = fullPrepared.XTrain;
+        const yFull = fullPrepared.yTrain;
+        const finalClasses = [...new Set(yFull)].sort((a, b) => a - b);
+        const finalClassLabels = fullPrepared.labelEncoder
+            ? finalClasses.map(c => fullPrepared.labelEncoder.inverseTransform([c])[0])
+            : finalClasses.map(String);
 
         const params = result.model.getParams ? result.model.getParams() : {};
         const finalModel = new result.cls(params);
         finalModel.fit(XFull, yFull);
 
         _state.finalizedModel = finalModel;
+        _state.finalizedPreprocessor = fullPrepared.preprocessor;
+        _state.finalizedFeatureNames = fullPrepared.featureNames;
+        _state.finalizedScaler = fullPrepared.scaler;
+        _state.finalizedEncoders = fullPrepared.encoders;
+        _state.finalizedLabelEncoder = fullPrepared.labelEncoder;
+        _state.finalizedClasses = finalClasses;
+        _state.finalizedClassLabels = finalClassLabels;
+        _state.finalizedPreprocessInfo = fullPrepared.preprocessInfo;
         _state.isFinalized = true;
 
         const cvScores = crossValidateWithPreprocessing(result.cls, _state.rawData, _state.targetCol, {
@@ -1685,7 +1703,7 @@ async function runFinalizeModel(container, result, featureNames) {
                 <div style="background: #f0fdf4; padding: 1rem; border-radius: 8px; border-left: 4px solid #10b981;">
                     <p style="color: #166534;">
                         <i class="fas fa-info-circle"></i>
-                        これは本番用モデルです。predict_model では確定済みモデルで予測を行います。
+                        これは本番用モデルです。前処理も全データでfitし直しており、predict_model では確定済みモデルと同じ前処理で予測を行います。
                         テストデータがなくなるため、独立したテスト評価は行えません。CVスコアは参考値として扱ってください。
                     </p>
                 </div>
@@ -1699,7 +1717,16 @@ async function runFinalizeModel(container, result, featureNames) {
             dlModelBtn.addEventListener('click', () => {
                 const exportData = serializeModel(
                     { model: finalModel, name: result.name, badge: result.badge },
-                    { featureNames: _state.featureNames, scaler: _state.scaler, encoders: _state.encoders, labelEncoder: _state.labelEncoder, classLabels: _state.classLabels, targetCol: _state.targetCol, fileName: _state.fileName, taskType: 'classification' }
+                    {
+                        featureNames: _state.finalizedFeatureNames || _state.featureNames,
+                        scaler: _state.finalizedScaler || _state.scaler,
+                        encoders: _state.finalizedEncoders || _state.encoders,
+                        labelEncoder: _state.finalizedLabelEncoder || _state.labelEncoder,
+                        classLabels: _state.finalizedClassLabels || _state.classLabels,
+                        targetCol: _state.targetCol,
+                        fileName: _state.fileName,
+                        taskType: 'classification'
+                    }
                 );
                 downloadJSON(exportData, makeModelFileName(_state.fileName, result.badge, 'classification'));
             });
@@ -1781,9 +1808,11 @@ function runPredictModel(container, result, featureNames) {
     }
 
     try {
-        const processedInput = _state.preprocessor
-            ? _state.preprocessor.transformInput(inputValues, featureNames)
-            : (_state.scaler ? _state.scaler.transform([inputValues]) : [inputValues]);
+        const activePreprocessor = _state.finalizedPreprocessor || _state.preprocessor;
+        const activeScaler = _state.finalizedScaler || _state.scaler;
+        const processedInput = activePreprocessor
+            ? activePreprocessor.transformInput(inputValues, featureNames)
+            : (activeScaler ? activeScaler.transform([inputValues]) : [inputValues]);
 
         // Use finalized > stacked > blended > created > best model
         const activeModel = _state.finalizedModel || _state.stackedModel || _state.blendedModel
@@ -1800,8 +1829,10 @@ function runPredictModel(container, result, featureNames) {
         container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 9);
 
         // Convert numeric prediction back to label
-        const predictedLabel = _state.labelEncoder
-            ? _state.labelEncoder.inverseTransform(prediction)[0]
+        const activeLabelEncoder = _state.finalizedLabelEncoder || _state.labelEncoder;
+        const activeClassLabels = _state.finalizedClassLabels || _state.classLabels;
+        const predictedLabel = activeLabelEncoder
+            ? activeLabelEncoder.inverseTransform(prediction)[0]
             : prediction[0];
 
         let probaHtml = '';
@@ -1809,7 +1840,7 @@ function runPredictModel(container, result, featureNames) {
             probaHtml = `
                 <div style="margin-top: 1rem;">
                     <p style="font-weight: 600; margin-bottom: 0.5rem;">クラス別確率:</p>
-                    ${_state.classLabels.map((label, i) => {
+                    ${activeClassLabels.map((label, i) => {
                         const p = proba[0][i] || 0;
                         return `<div style="display: flex; align-items: center; margin: 0.25rem 0;">
                             <span style="width: 80px; font-size: 0.85rem;">${label}</span>
@@ -1846,7 +1877,7 @@ function runPredictModel(container, result, featureNames) {
                     ['予測クラス', predictedLabel]
                 ];
                 if (proba && proba[0]) {
-                    _state.classLabels.forEach((label, i) => {
+                    activeClassLabels.forEach((label, i) => {
                         const p = proba[0][i] || 0;
                         rows.push([`確率: ${label}`, `${(p * 100).toFixed(1)}%`]);
                     });

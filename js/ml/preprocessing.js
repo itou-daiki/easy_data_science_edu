@@ -669,6 +669,7 @@ export function encodeCategorials(data, columns) {
  * @param {Array} rawData
  * @param {string} targetCol
  * @param {Object} [options]
+ * @param {number} [options.testSize=0.3] - Holdout fraction. Use 0 to fit preprocessing on all valid rows.
  * @returns {{
  *   XTrain: number[][],
  *   XTest: number[][],
@@ -719,11 +720,22 @@ export function prepareTrainTestFeatures(rawData, targetCol, options = {}) {
     throw new Error('prepareTrainTestFeatures: 特徴量を1つ以上選択してください。');
   }
 
-  const { trainRows, testRows } = _splitRows(rows, targetCol, {
-    testSize,
-    randomState,
-    stratify: task === 'classification',
-  });
+  if (testSize < 0 || testSize >= 1) {
+    throw new Error('prepareTrainTestFeatures: testSize must be 0 or between 0 and 1 (exclusive)');
+  }
+
+  let trainRows;
+  let testRows;
+  if (testSize === 0) {
+    trainRows = [...rows];
+    testRows = [];
+  } else {
+    ({ trainRows, testRows } = _splitRows(rows, targetCol, {
+      testSize,
+      randomState,
+      stratify: task === 'classification',
+    }));
+  }
 
   const preprocessInfo = {
     outlierRows: 0,
@@ -903,6 +915,9 @@ export function prepareTrainTestFeatures(rawData, targetCol, options = {}) {
   }
 
   const transformRows = (sourceRows, includeTarget = false) => {
+    if (sourceRows.length === 0) {
+      return includeTarget ? { X: [], y: [] } : [];
+    }
     let X = toMatrix(sourceRows);
     X = X.map(row => {
       const next = [...row];

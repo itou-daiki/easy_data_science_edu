@@ -1,34 +1,33 @@
-# Iteration 18: スタッキングOOFの前処理リーク修正
+# Iteration 19: finalize_modelの全データ前処理整合
 
 ## 目標
-回帰・分類の `stack_models` でメタ学習器に渡すOut-of-Fold予測を、保持訓練データ全体でfit済みの前処理行列ではなく、foldごとの訓練データだけでfitした前処理から生成する。
+
+`finalize_model` 実行後に「全データで再学習したモデル」と、`predict_model` / モデルJSONで使われる前処理器が同じfit母集団になるようにする。教育用ツールとして、確定モデルの説明と実際の予測挙動がずれない状態にする。
 
 ## タスク
 
-- [x] 1. 回帰・分類のstack実装と前処理fold関数の接続点を確認する
-- [x] 2. 回帰stackのOOFメタ特徴量をfold内前処理fitに切り替える
-- [x] 3. 分類stackのOOFメタ特徴量をfold内前処理fitに切り替える
-- [x] 4. stack結果の画面文言を前処理込みOOFに更新する
-- [x] 5. 静的チェックと簡易stack実行確認を実施する
+- [x] 1. 回帰・分類のfinalize実装と予測前処理の参照先を確認する
+- [x] 2. 全データfit用の前処理経路を追加する
+- [x] 3. 回帰finalizeで全データfit済み前処理を保存・利用する
+- [x] 4. 分類finalizeで全データfit済み前処理・ラベル情報を保存・利用する
+- [x] 5. 静的チェックと簡易検証を実施する
 - [x] 6. コミットしてプッシュする
 
 ## 成功基準
 
-- 回帰stackのOOF生成で `_state.XTrain` をfold分割しない
-- 分類stackのOOF生成で `_state.XTrain` / `_state.yTrain` をfold分割しない
-- `prepareTrainValidationFeatures()` を使い、各foldで前処理をfitする
-- `node --check`、ES module import確認、簡易stack相当実行確認、`git diff --check` が通る
+- `finalize_model` の学習データが保持訓練fit済み行列ではなく、全データfit済み前処理から生成される
+- `predict_model` が確定モデルと同じ全データfit済み前処理器を使う
+- モデルJSONエクスポートの `featureNames` / `scaler` / `encoders` / `labelEncoder` が確定モデル用に更新される
+- `node --check`、ES module import確認、簡易finalize相当検証、`git diff --check` が通る
 
 ## レビュー
 
-- 回帰stackのOOF生成を `_state.XTrain` のfold分割から `_state.trainRows` のfold分割へ変更した。
-- 回帰stackでは各foldで `prepareTrainValidationFeatures()` を呼び、fold訓練行だけで前処理をfitしてからベースモデルの検証fold予測を生成するようにした。
-- 分類stackのOOF生成を `_state.XTrain` / `_state.yTrain` のfold分割から `_state.trainRows` とraw target由来のstack targetのfold分割へ変更した。
-- 分類stackでも各foldで `prepareTrainValidationFeatures()` を呼び、fold訓練行だけで前処理をfitするようにした。
-- 分類stackの確率特徴量は、モデルごとの `classes` をグローバルなクラス順に揃えてからメタ特徴量へ入れるようにした。
-- stack結果の画面文言を「foldごとに前処理をfitしたOut-of-Fold予測」に更新した。
-- `node --check js/analyses/regression.js` と `node --check js/analyses/classification.js` は成功。
-- ES module import確認は警告のみで成功。
-- デモCSVを使い、回帰・分類の前処理込みOOFメタ特徴量が全行・全列で数値として生成されることを確認した。
-- `_state.XTrain` をfold分割する旧stack経路が残っていないことを `rg` で確認した。
-- `git diff --check` は成功。
+- `prepareTrainTestFeatures()` で `testSize: 0` を許可し、テスト分割を作らず全有効行に前処理をfitできるようにした。
+- 空のholdout変換で `StandardScaler.transform([])` に進まないよう、`transformRows()` に空配列処理を追加した。
+- 回帰 `finalize_model` は `_state.XTrain` / `_state.XTest` の結合ではなく、全データfit済み前処理から `XFull` / `yFull` を作って再学習するようにした。
+- 分類 `finalize_model` も全データfit済み前処理から再学習し、確定モデル用の `labelEncoder` / class labels を保存するようにした。
+- `predict_model` は確定モデルがある場合、確定モデル用の前処理器を優先して入力を変換するようにした。
+- モデルJSONエクスポートは確定モデル用の `featureNames` / `scaler` / `encoders` / `labelEncoder` / `classLabels` を優先するようにした。
+- `node --check`、ES module import確認、`git diff --check` は成功。
+- デモCSVで `testSize: 0` の全データ前処理、入力変換、DecisionTreeによるfinalize相当のfit/predictが回帰・分類とも成功。
+- 旧finalize経路である `_state.XTrain` / `_state.XTest` の単純結合が残っていないことを `rg` で確認した。

@@ -1493,17 +1493,26 @@ async function runFinalizeModel(container, result, featureNames) {
     await new Promise(r => setTimeout(r, 100));
 
     try {
-        // Combine train and test data
-        const XFull = [..._state.XTrain, ..._state.XTest];
-        const yFull = [..._state.yTrain, ..._state.yTest];
+        const fullPrepared = prepareTrainTestFeatures(_state.rawData, _state.targetCol, {
+            selectedFeatures: _state.selectedFeatures,
+            task: 'regression',
+            testSize: 0,
+            randomState: 42
+        });
+        const XFull = fullPrepared.XTrain;
+        const yFull = fullPrepared.yTrain;
 
-        // Retrain the model on full data
         const params = result.model.getParams ? result.model.getParams() : {};
         const finalModel = new result.cls(params);
         finalModel.fit(XFull, yFull);
 
         // Store for predict
         _state.finalizedModel = finalModel;
+        _state.finalizedPreprocessor = fullPrepared.preprocessor;
+        _state.finalizedFeatureNames = fullPrepared.featureNames;
+        _state.finalizedScaler = fullPrepared.scaler;
+        _state.finalizedEncoders = fullPrepared.encoders;
+        _state.finalizedPreprocessInfo = fullPrepared.preprocessInfo;
         _state.isFinalized = true;
 
         // CV score on full data for reference
@@ -1531,7 +1540,7 @@ async function runFinalizeModel(container, result, featureNames) {
                 <div style="background: #f0fdf4; padding: 1rem; border-radius: 8px; border-left: 4px solid #10b981;">
                     <p style="color: #166534;">
                         <i class="fas fa-info-circle"></i>
-                        これは本番用モデルです。predict_model では確定済みモデルで予測を行います。
+                        これは本番用モデルです。前処理も全データでfitし直しており、predict_model では確定済みモデルと同じ前処理で予測を行います。
                         テストデータがなくなるため、独立したテスト評価は行えません。CVスコアは参考値として扱ってください。
                     </p>
                 </div>
@@ -1545,7 +1554,14 @@ async function runFinalizeModel(container, result, featureNames) {
             dlModelBtn.addEventListener('click', () => {
                 const exportData = serializeModel(
                     { model: finalModel, name: result.name, badge: result.badge },
-                    { featureNames: _state.featureNames, scaler: _state.scaler, encoders: _state.encoders, targetCol: _state.targetCol, fileName: _state.fileName, taskType: 'regression' }
+                    {
+                        featureNames: _state.finalizedFeatureNames || _state.featureNames,
+                        scaler: _state.finalizedScaler || _state.scaler,
+                        encoders: _state.finalizedEncoders || _state.encoders,
+                        targetCol: _state.targetCol,
+                        fileName: _state.fileName,
+                        taskType: 'regression'
+                    }
                 );
                 downloadJSON(exportData, makeModelFileName(_state.fileName, result.badge, 'regression'));
             });
@@ -1627,9 +1643,11 @@ function runPredictModel(container, result, featureNames) {
     }
 
     try {
-        const processedInput = _state.preprocessor
-            ? _state.preprocessor.transformInput(inputValues, featureNames)
-            : (_state.scaler ? _state.scaler.transform([inputValues]) : [inputValues]);
+        const activePreprocessor = _state.finalizedPreprocessor || _state.preprocessor;
+        const activeScaler = _state.finalizedScaler || _state.scaler;
+        const processedInput = activePreprocessor
+            ? activePreprocessor.transformInput(inputValues, featureNames)
+            : (activeScaler ? activeScaler.transform([inputValues]) : [inputValues]);
 
         // Use finalized model > stacked model > blended model > created model > original model
         const activeModel = _state.finalizedModel || _state.stackedModel || _state.blendedModel || _state.createdModel || result.model;
