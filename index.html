@@ -108,8 +108,9 @@
                 <span class="close-modal" id="close-ai-settings-modal">&times;</span>
             </div>
             <p class="ai-settings-description">
-                Gemini APIキーを入力すると、分析結果ページで生成AIによる解釈補助を利用できます。
-                APIキーはこのブラウザタブ内にのみ保持されます。有効化中に「解釈を生成」を押した場合のみ、
+                分析結果ページでは、APIキーがなくても他の生成AIに貼り付けるためのAI用テキストをコピーできます。
+                Gemini APIキーを入力すると、ブラウザ内の補助パネルから直接「解釈を生成」し、結果について追加質問できます。
+                APIキーはこのブラウザタブ内にのみ保持されます。「解釈を生成」または追加質問を押した場合のみ、
                 データプレビュー先頭10件・要約統計量・データ構造・分析手法・主要指標・注意点が Google Gemini API へ送信されます。
             </p>
             <div class="ai-settings-form">
@@ -118,6 +119,7 @@
 
                 <label for="gemini-model-input">使用モデル</label>
                 <input type="text" id="gemini-model-input" value="gemini-2.5-flash" autocomplete="off">
+                <p class="input-hint">指定モデルが利用できない場合は gemini-2.5-flash へ自動で切り替えます。</p>
 
                 <div class="ai-settings-actions">
                     <button type="button" id="save-ai-settings-btn" class="btn-analysis">

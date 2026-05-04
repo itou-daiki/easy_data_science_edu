@@ -322,6 +322,7 @@
             </div>
             <div class="manual-group">
                 <div class="manual-group-title">モデル活用</div>
+                <a class="manual-link" href="#ai-assist"><i class="fas fa-wand-magic-sparkles"></i> 生成AI支援</a>
                 <a class="manual-link" href="#prediction-mode"><i class="fas fa-crosshairs"></i> 予測モード</a>
                 <a class="manual-link" href="#image"><i class="fas fa-image"></i> 画像分類</a>
                 <a class="manual-link" href="#audio"><i class="fas fa-microphone"></i> 音声分類</a>
@@ -516,8 +517,33 @@
                 </div>
             </section>
 
+            <section id="ai-assist" class="manual-section">
+                <h2><i class="fas fa-wand-magic-sparkles"></i> 11. 生成AI支援</h2>
+                <p>分析結果ページのフローティングパネルから、結果の読み取りを補助するAI用テキストを作成できます。</p>
+                <div class="manual-grid">
+                    <div class="manual-card">
+                        <h4>APIキーなしで使う</h4>
+                        <p>「AI用テキストをコピー」を押すと、データプレビュー、要約統計量、分析手法、主要指標、注意点を含む文脈をコピーできます。ChatGPT、Gemini、Claudeなどに貼り付けて利用してください。</p>
+                    </div>
+                    <div class="manual-card">
+                        <h4>Geminiで直接生成する</h4>
+                        <p>ページ上部の「生成AI支援」からGemini APIキーを入力すると、「解釈を生成」と追加質問を使ってブラウザ内で解釈補助を生成できます。</p>
+                    </div>
+                </div>
+                <div class="manual-alert manual-warning">
+                    <strong>送信範囲:</strong> Google Gemini APIへ送信されるのは「解釈を生成」または追加質問を押した場合だけです。アップロードファイル全体ではなく、先頭10件のプレビュー、要約統計量、分析手法、主要指標、注意点などの要約文脈を送信します。
+                </div>
+                <ul>
+                    <li>回帰・分類では、目的変数を選択してモデル比較結果が表示されるまでコピーできません</li>
+                    <li>APIキー有効時は、生成した解釈や分析文脈をもとに「この結果をレポート用に短く書くと？」のような追加質問ができます</li>
+                    <li>コピー内容には、信頼性と妥当性チェック、解釈の注意点、レポート例を求める指示が含まれます</li>
+                    <li>指定したGeminiモデルが利用できない場合は、既定モデルへ自動で切り替えます</li>
+                    <li>APIキーはブラウザタブ内にのみ保持され、ページを閉じると消えます</li>
+                </ul>
+            </section>
+
             <section id="prediction-mode" class="manual-section">
-                <h2><i class="fas fa-crosshairs"></i> 11. モデル保存と予測モード</h2>
+                <h2><i class="fas fa-crosshairs"></i> 12. モデル保存と予測モード</h2>
                 <p>回帰・分類でファイナライズしたモデルは JSON ファイルとして保存できます。保存済みモデルはトップ画面の「モデル読み込み＆予測」から利用します。</p>
                 <ol>
                     <li>JSON モデルファイルをアップロードする</li>
@@ -528,7 +554,7 @@
             </section>
 
             <section id="image" class="manual-section">
-                <h2><i class="fas fa-image"></i> 12. 画像分類（MobileNet）</h2>
+                <h2><i class="fas fa-image"></i> 13. 画像分類（MobileNet）</h2>
                 <p>CSVデータを使わず、画像ファイルを直接アップロードして分類モデルを作ります。</p>
                 <span class="manual-badge">2クラス以上</span>
                 <span class="manual-badge">各クラス最低2枚</span>
@@ -544,7 +570,7 @@
             </section>
 
             <section id="audio" class="manual-section">
-                <h2><i class="fas fa-microphone"></i> 13. 音声分類（Web Audio）</h2>
+                <h2><i class="fas fa-microphone"></i> 14. 音声分類（Web Audio）</h2>
                 <p>マイク録音または音声ファイルからサンプルを集め、スペクトル特徴量を使って分類モデルを学習します。</p>
                 <span class="manual-badge">2クラス以上</span>
                 <span class="manual-badge">各クラス2サンプル以上</span>
@@ -562,7 +588,7 @@
             </section>
 
             <section id="reading" class="manual-section">
-                <h2><i class="fas fa-chart-bar"></i> 14. 結果の見方</h2>
+                <h2><i class="fas fa-chart-bar"></i> 15. 結果の見方</h2>
                 <ul>
                     <li>テストスコアと交差検証スコアを両方見る</li>
                     <li>回帰では R2 だけでなく MAE と RMSE も確認する</li>
@@ -573,7 +599,7 @@
             </section>
 
             <section id="trouble" class="manual-section">
-                <h2><i class="fas fa-triangle-exclamation"></i> 15. よくあるトラブル</h2>
+                <h2><i class="fas fa-triangle-exclamation"></i> 16. よくあるトラブル</h2>
                 <h3>ファイルが読み込めない</h3>
                 <p>拡張子、1行目の列名、空行、セル結合、装飾用の見出し行を確認してください。</p>
                 <h3>分析カードが押せない</h3>
@@ -585,7 +611,7 @@
             </section>
 
             <section id="checklist" class="manual-section">
-                <h2><i class="fas fa-list-check"></i> 16. 分析前チェックリスト</h2>
+                <h2><i class="fas fa-list-check"></i> 17. 分析前チェックリスト</h2>
                 <ul>
                     <li>目的変数を決めた</li>
                     <li>目的変数が数値なら回帰、カテゴリなら分類を選ぶと決めた</li>

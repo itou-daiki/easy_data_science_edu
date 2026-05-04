@@ -478,6 +478,9 @@ table tr:hover { background: var(--background); }
 .ai-settings-form label {
     font-weight: 600; color: var(--text-primary); font-size: 0.9rem;
 }
+.input-hint {
+    margin: -0.35rem 0 0; color: var(--text-secondary); font-size: 0.8rem; line-height: 1.5;
+}
 .ai-settings-actions {
     display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem;
 }
@@ -564,6 +567,24 @@ table tr:hover { background: var(--background); }
     margin-top: 0.85rem; padding: 0.9rem; border-radius: 8px; min-height: 8rem;
     background: #0f172a; color: #e2e8f0; font-size: 0.9rem; line-height: 1.7;
     white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.ai-assist-chat-area {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem;
+    margin-top: 0.85rem;
+}
+.ai-assist-chat-input {
+    width: 100%; min-width: 0; resize: vertical; max-height: 8rem;
+    border: 1px solid var(--border-color); border-radius: 8px;
+    padding: 0.7rem 0.75rem; font: inherit; line-height: 1.5;
+}
+.ai-assist-chat-send {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem;
+    border-radius: 8px; padding: 0.7rem 0.85rem; font-weight: 700;
+    background: #1e90ff; color: white; border: 1px solid #1e90ff;
+}
+.ai-assist-chat-send:disabled,
+.ai-assist-chat-input:disabled {
+    opacity: 0.65; cursor: not-allowed;
 }
 .demo-options-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
 .demo-option-btn {
@@ -946,4 +967,6 @@ table tr:hover { background: var(--background); }
     .step-indicator .step-connector { width: 16px; }
     .metric-card .metric-value { font-size: 1.5rem; }
     .confusion-matrix td { padding: 0.5rem; font-size: 0.875rem; min-width: 50px; }
+    .ai-assist-actions,
+    .ai-assist-chat-area { grid-template-columns: 1fr; }
 }
