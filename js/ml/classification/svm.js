@@ -4,6 +4,7 @@
  * Multi-class via one-vs-rest strategy.
  * @module classification/svm
  */
+import { createSeededRandom, randomInt } from '../random.js';
 
 /**
  * @class SVMClassifier
@@ -14,11 +15,13 @@ export class SVMClassifier {
      * @param {number} [params.C=1.0] - Regularization parameter
      * @param {number} [params.learningRate=0.001] - SGD learning rate
      * @param {number} [params.maxIter=1000] - Maximum training iterations
+     * @param {number} [params.randomState=42] - Seed for SGD sample order
      */
-    constructor({ C = 1.0, learningRate = 0.001, maxIter = 1000 } = {}) {
+    constructor({ C = 1.0, learningRate = 0.001, maxIter = 1000, randomState = 42 } = {}) {
         this.C = C;
         this.learningRate = learningRate;
         this.maxIter = maxIter;
+        this.randomState = randomState;
         this.weights = null;
         this.classes = null;
         this.nFeatures = null;
@@ -37,7 +40,7 @@ export class SVMClassifier {
         const w = new Array(d + 1).fill(0);
 
         for (let iter = 0; iter < this.maxIter; iter++) {
-            const idx = Math.floor(Math.random() * n);
+            const idx = randomInt(this._rng, n);
             const xi = X[idx];
             const yi = yBin[idx];
 
@@ -97,6 +100,7 @@ export class SVMClassifier {
 
         this.classes = [...new Set(y)].sort((a, b) => a - b);
         this.nFeatures = X[0].length;
+        this._rng = createSeededRandom(this.randomState);
 
         if (this.classes.length < 2) {
             throw new Error('At least 2 classes are required');
@@ -166,7 +170,8 @@ export class SVMClassifier {
         return {
             C: this.C,
             learningRate: this.learningRate,
-            maxIter: this.maxIter
+            maxIter: this.maxIter,
+            randomState: this.randomState
         };
     }
 

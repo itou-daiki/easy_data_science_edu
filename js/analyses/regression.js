@@ -22,9 +22,9 @@ const MODELS = [
     { name: 'Ridge回帰', cls: RidgeRegression, params: { alpha: 1.0 }, badge: 'Ridge' },
     { name: 'Lasso回帰', cls: LassoRegression, params: { alpha: 1.0 }, badge: 'Lasso' },
     { name: '決定木', cls: DecisionTreeRegressor, params: { maxDepth: 5 }, badge: 'Tree' },
-    { name: 'ランダムフォレスト', cls: RandomForestRegressor, params: { nEstimators: 100, maxDepth: 8, maxFeatures: null }, badge: 'RF' },
+    { name: 'ランダムフォレスト', cls: RandomForestRegressor, params: { nEstimators: 100, maxDepth: 8, maxFeatures: null, randomState: 42 }, badge: 'RF' },
     { name: 'K近傍法', cls: KNNRegressor, params: { nNeighbors: 5 }, badge: 'KNN' },
-    { name: '勾配ブースティング', cls: GradientBoostingRegressor, params: { nEstimators: 100, learningRate: 0.1, maxDepth: 3 }, badge: 'GBM' }
+    { name: '勾配ブースティング', cls: GradientBoostingRegressor, params: { nEstimators: 100, learningRate: 0.1, maxDepth: 3, randomState: 42 }, badge: 'GBM' }
 ];
 
 const PARAM_GRIDS = {

@@ -6,6 +6,7 @@
  */
 
 import { DecisionTreeRegressor } from '../regression/decision_tree.js';
+import { createSeededRandom, randomInt } from '../random.js';
 
 /**
  * @class GradientBoostingClassifier
@@ -17,12 +18,14 @@ export class GradientBoostingClassifier {
      * @param {number} [params.learningRate=0.1] - Shrinkage factor
      * @param {number} [params.maxDepth=3] - Maximum depth of each regression tree
      * @param {number} [params.subsample=1.0] - Fraction of samples per stage
+     * @param {number} [params.randomState=42] - Seed for subsampling
      */
-    constructor({ nEstimators = 100, learningRate = 0.1, maxDepth = 3, subsample = 1.0 } = {}) {
+    constructor({ nEstimators = 100, learningRate = 0.1, maxDepth = 3, subsample = 1.0, randomState = 42 } = {}) {
         this.nEstimators = nEstimators;
         this.learningRate = learningRate;
         this.maxDepth = maxDepth;
         this.subsample = Math.max(0.1, Math.min(1.0, subsample));
+        this.randomState = randomState;
         this.models = null;
         this.initialPredictions = null;
         this.classes = null;
@@ -48,7 +51,7 @@ export class GradientBoostingClassifier {
         }
         const indices = Array.from({ length: n }, (_, i) => i);
         for (let i = indices.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
+            const j = randomInt(this._rng, i + 1);
             [indices[i], indices[j]] = [indices[j], indices[i]];
         }
         return indices.slice(0, size);
@@ -110,6 +113,7 @@ export class GradientBoostingClassifier {
 
         this.classes = [...new Set(y)].sort((a, b) => a - b);
         this.nFeatures = X[0].length;
+        this._rng = createSeededRandom(this.randomState);
 
         if (this.classes.length < 2) {
             throw new Error('At least 2 classes are required');
@@ -205,7 +209,8 @@ export class GradientBoostingClassifier {
             nEstimators: this.nEstimators,
             learningRate: this.learningRate,
             maxDepth: this.maxDepth,
-            subsample: this.subsample
+            subsample: this.subsample,
+            randomState: this.randomState
         };
     }
 

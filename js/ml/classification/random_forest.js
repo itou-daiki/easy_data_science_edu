@@ -5,6 +5,7 @@
  */
 
 import { DecisionTreeClassifier } from './decision_tree.js';
+import { createSeededRandom, randomInt, shuffleCopy } from '../random.js';
 
 /**
  * @class RandomForestClassifier
@@ -16,12 +17,14 @@ export class RandomForestClassifier {
      * @param {number} [params.maxDepth=5] - Maximum depth per tree
      * @param {number} [params.minSamplesSplit=2] - Minimum samples to split
      * @param {string|number} [params.maxFeatures='sqrt'] - Features per split: 'sqrt', 'log2', or integer
+     * @param {number} [params.randomState=42] - Seed for bootstrap and feature sampling
      */
-    constructor({ nEstimators = 100, maxDepth = 5, minSamplesSplit = 2, maxFeatures = 'sqrt' } = {}) {
+    constructor({ nEstimators = 100, maxDepth = 5, minSamplesSplit = 2, maxFeatures = 'sqrt', randomState = 42 } = {}) {
         this.nEstimators = nEstimators;
         this.maxDepth = maxDepth;
         this.minSamplesSplit = minSamplesSplit;
         this.maxFeatures = maxFeatures;
+        this.randomState = randomState;
         this.trees = [];
         this.featureSubsets = [];
         this.classes = null;
@@ -50,16 +53,17 @@ export class RandomForestClassifier {
      * @param {number[][]} X
      * @param {number[]} y
      * @param {number} nFeatSample
+     * @param {() => number} rng
      * @returns {{ X: number[][], y: number[], featureIdx: number[] }}
      */
-    _bootstrapSample(X, y, nFeatSample) {
+    _bootstrapSample(X, y, nFeatSample, rng) {
         const n = X.length;
         const d = X[0].length;
 
-        const sampleIdx = Array.from({ length: n }, () => Math.floor(Math.random() * n));
+        const sampleIdx = Array.from({ length: n }, () => randomInt(rng, n));
 
         const allFeatures = Array.from({ length: d }, (_, i) => i);
-        const shuffled = allFeatures.sort(() => Math.random() - 0.5);
+        const shuffled = shuffleCopy(allFeatures, rng);
         const featureIdx = shuffled.slice(0, nFeatSample).sort((a, b) => a - b);
 
         const Xb = sampleIdx.map(i => featureIdx.map(f => X[i][f]));
@@ -85,9 +89,10 @@ export class RandomForestClassifier {
         this.featureSubsets = [];
 
         const nFeatSample = this._getMaxFeatureCount(this.nFeatures);
+        const rng = createSeededRandom(this.randomState);
 
         for (let i = 0; i < this.nEstimators; i++) {
-            const sample = this._bootstrapSample(X, y, nFeatSample);
+            const sample = this._bootstrapSample(X, y, nFeatSample, rng);
 
             const tree = new DecisionTreeClassifier({
                 maxDepth: this.maxDepth,
@@ -159,7 +164,8 @@ export class RandomForestClassifier {
             nEstimators: this.nEstimators,
             maxDepth: this.maxDepth,
             minSamplesSplit: this.minSamplesSplit,
-            maxFeatures: this.maxFeatures
+            maxFeatures: this.maxFeatures,
+            randomState: this.randomState
         };
     }
 

@@ -1,35 +1,36 @@
-# Iteration 16: 前処理込み交差検証への修正
+# Iteration 17: 乱数モデルの再現性対応
 
 ## 目標
-回帰・分類の比較、作成、チューニング、ファイナライズ時のCVで、欠損補完、変換、エンコード、特徴量選択、標準化をfoldごとの訓練データだけでfitし、検証foldからの前処理リークを防ぐ。
+RandomForest、GradientBoosting、SVMなど乱数を使うモデルで `Math.random()` への直接依存をなくし、`randomState` を指定すれば同じデータ・同じ設定で同じ結果になるようにする。
 
 ## タスク
 
-- [x] 1. 既存の前処理パイプラインとCV/GridSearchの境界を確認する
-- [x] 2. fold指定の訓練/検証行に対して前処理をfit/transformする関数を追加する
-- [x] 3. 前処理込みCVと前処理込みGridSearchを追加する
-- [x] 4. 回帰のcompare/create/tune/finalize CVを前処理込みCVへ切り替える
-- [x] 5. 分類のcompare/create/tune/finalize CVを前処理込みCVへ切り替える
-- [x] 6. 画面文言と信頼性チェックの説明を更新する
-- [x] 7. 静的チェック、簡易実行確認、差分レビューを行う
-- [x] 8. コミットしてプッシュする
+- [x] 1. `Math.random()` 使用箇所と乱数モデルの `getParams()` を確認する
+- [x] 2. seed付き乱数ヘルパーを追加する
+- [x] 3. 回帰RandomForest/GradientBoostingを `randomState` 対応にする
+- [x] 4. 分類RandomForest/GradientBoosting/SVMを `randomState` 対応にする
+- [x] 5. 回帰・分類UIのモデル定義に `randomState: 42` を明示する
+- [x] 6. 静的チェックと簡易再現性テストを実施する
+- [x] 7. コミットしてプッシュする
 
 ## 成功基準
 
-- CVの各foldで前処理が訓練foldだけにfitされる
-- 回帰・分類の比較順位とチューニングが新しいCV経路を使う
-- 画面上のCV説明が「前処理後データCV」ではなく「前処理込みCV」になっている
-- `node --check`、ES module import確認、簡易CV実行確認、`git diff --check` が通る
+- `rg "Math.random" js/ml` で対象ML実装に直接利用が残らない
+- 同じ `randomState` の同一モデルを2回fitして、予測と特徴量重要度が一致する
+- 異なる `randomState` では、少なくとも乱数を使うモデルの内部サンプル/特徴量選択が変わり得る
+- `node --check`、ES module import確認、`git diff --check` が通る
 
 ## レビュー
 
-- `prepareTrainValidationFeatures()` を追加し、指定されたfoldの訓練行だけで欠損補完、カテゴリエンコード、外れ値除去、特徴量変換、多重共線性除去、標準化をfitし、検証行へtransformできるようにした。
-- `crossValidateWithPreprocessing()` と `gridSearchWithPreprocessing()` を追加し、raw row単位でfold分割してから各fold内で前処理をfitする経路を作った。
-- 回帰のcompare/create/tune/finalizeのCVを前処理込みCVへ切り替えた。
-- 分類のcompare/create/tune/finalizeのCVを前処理込みCVへ切り替えた。
-- 信頼性チェック、画面文言、使い方マニュアルから「前処理後データCV」の注意を外し、「foldごとの訓練データだけで前処理をfitするCV」に更新した。
-- `node --check js/ml/preprocessing.js`、`node --check js/ml/model_selection.js`、`node --check js/analyses/regression.js`、`node --check js/analyses/classification.js`、`node --check js/analysis_quality.js` は成功。
-- ES module import確認は警告のみで成功。
-- デモCSVを使った前処理込みCVと前処理込みGridSearchの簡易実行確認は成功。
+- `js/ml/random.js` を追加し、Mulberry32ベースのseed付き乱数、整数サンプリング、Fisher-Yatesシャッフルを共通化した。
+- 回帰RandomForestのbootstrapと特徴量サンプリングを `randomState` で再現可能にした。
+- 回帰GradientBoostingのsubsampleを `randomState` で再現可能にした。
+- 分類RandomForestのbootstrapと特徴量サンプリングを `randomState` で再現可能にした。
+- 分類GradientBoostingのsubsampleを `randomState` で再現可能にした。
+- 分類SVMのSGDサンプル順を `randomState` で再現可能にした。
+- 各モデルの `getParams()` に `randomState` を含め、clone/finalize/export時にseedが落ちないようにした。
+- 回帰・分類UIの乱数モデル定義に `randomState: 42` を明示した。
+- `rg "Math.random" js/ml` で直接利用が残っていないことを確認した。
+- 対象ファイルの `node --check` とES module import確認は成功。
+- 同じseedで予測・確率・特徴量重要度が一致し、異なるseedで内部サンプリングが変わる簡易再現性テストは成功。
 - `git diff --check` は成功。
-- 残リスク: スタッキングのOOFメタ特徴量生成は、まだ保持訓練データ全体でfit済みの前処理行列を使っている。比較・チューニングのCVリークは解消したが、スタッキングは次の改善候補。

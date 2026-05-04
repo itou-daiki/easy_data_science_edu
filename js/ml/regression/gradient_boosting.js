@@ -6,6 +6,7 @@
  */
 
 import { DecisionTreeRegressor } from './decision_tree.js';
+import { createSeededRandom, randomInt } from '../random.js';
 
 /**
  * @class GradientBoostingRegressor
@@ -18,6 +19,7 @@ export class GradientBoostingRegressor {
      * @param {number}  params.learningRate    - Shrinkage factor (default 0.1).
      * @param {number}  params.maxDepth        - Max depth per tree (default 3).
      * @param {number}  params.subsample       - Fraction of samples per tree (default 1.0).
+     * @param {number}  params.randomState     - Seed for subsampling (default 42).
      */
     constructor(params = {}) {
         /** @type {number} */
@@ -28,6 +30,8 @@ export class GradientBoostingRegressor {
         this.maxDepth = params.maxDepth ?? 3;
         /** @type {number} */
         this.subsample = params.subsample ?? 1.0;
+        /** @type {number} */
+        this.randomState = params.randomState ?? 42;
         /** @type {DecisionTreeRegressor[]} */
         this.trees = [];
         /** @type {number|null} Initial prediction (mean of training targets) */
@@ -42,7 +46,7 @@ export class GradientBoostingRegressor {
      * @param {number} fraction  - Fraction to sample (0, 1].
      * @returns {number[]}
      */
-    static _subsampleIndices(n, fraction) {
+    static _subsampleIndices(n, fraction, rng) {
         if (fraction >= 1.0) {
             return Array.from({ length: n }, (_, i) => i);
         }
@@ -50,7 +54,7 @@ export class GradientBoostingRegressor {
         const pool = Array.from({ length: n }, (_, i) => i);
         // Fisher-Yates partial shuffle
         for (let i = pool.length - 1; i > pool.length - 1 - k && i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
+            const j = randomInt(rng, i + 1);
             [pool[i], pool[j]] = [pool[j], pool[i]];
         }
         return pool.slice(pool.length - k);
@@ -79,13 +83,14 @@ export class GradientBoostingRegressor {
         // Current predictions for each sample
         let predictions = Array(n).fill(this.initialPrediction);
         this.trees = [];
+        const rng = createSeededRandom(this.randomState);
 
         for (let stage = 0; stage < this.nEstimators; stage++) {
             // Compute residuals (negative gradient of MSE loss = y - F)
             const residuals = y.map((yi, i) => yi - predictions[i]);
 
             // Subsample
-            const sampleIdx = GradientBoostingRegressor._subsampleIndices(n, this.subsample);
+            const sampleIdx = GradientBoostingRegressor._subsampleIndices(n, this.subsample, rng);
             const Xsub = sampleIdx.map(i => X[i]);
             const rSub = sampleIdx.map(i => residuals[i]);
 
@@ -134,7 +139,7 @@ export class GradientBoostingRegressor {
 
     /**
      * Return model parameters.
-     * @returns {{ nEstimators: number, learningRate: number, maxDepth: number, subsample: number }}
+     * @returns {{ nEstimators: number, learningRate: number, maxDepth: number, subsample: number, randomState: number }}
      */
     getParams() {
         return {
@@ -142,6 +147,7 @@ export class GradientBoostingRegressor {
             learningRate: this.learningRate,
             maxDepth: this.maxDepth,
             subsample: this.subsample,
+            randomState: this.randomState,
         };
     }
 

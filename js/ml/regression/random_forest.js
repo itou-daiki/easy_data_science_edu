@@ -6,6 +6,7 @@
  */
 
 import { DecisionTreeRegressor } from './decision_tree.js';
+import { createSeededRandom, randomInt } from '../random.js';
 
 /**
  * @class RandomForestRegressor
@@ -18,6 +19,7 @@ export class RandomForestRegressor {
      * @param {number}         params.maxDepth           - Max depth per tree (default 5).
      * @param {number}         params.minSamplesSplit    - Min samples to split (default 2).
      * @param {string|number}  params.maxFeatures        - Features per split: 'sqrt', 'log2', number, or null for all (default 'sqrt').
+     * @param {number}         params.randomState        - Seed for bootstrap and feature sampling (default 42).
      */
     constructor(params = {}) {
         /** @type {number} */
@@ -28,6 +30,8 @@ export class RandomForestRegressor {
         this.minSamplesSplit = params.minSamplesSplit ?? 2;
         /** @type {string|number} */
         this.maxFeatures = 'maxFeatures' in params ? params.maxFeatures : 'sqrt';
+        /** @type {number} */
+        this.randomState = params.randomState ?? 42;
         /** @type {DecisionTreeRegressor[]} */
         this.trees = [];
         /** @type {number[][]} Feature subsets used for each tree */
@@ -59,10 +63,10 @@ export class RandomForestRegressor {
      * @param {number} n - Population size.
      * @returns {number[]} Array of sampled indices.
      */
-    static _bootstrapIndices(n) {
+    static _bootstrapIndices(n, rng) {
         const indices = [];
         for (let i = 0; i < n; i++) {
-            indices.push(Math.floor(Math.random() * n));
+            indices.push(randomInt(rng, n));
         }
         return indices;
     }
@@ -73,11 +77,11 @@ export class RandomForestRegressor {
      * @param {number} k
      * @returns {number[]}
      */
-    static _sampleFeatures(total, k) {
+    static _sampleFeatures(total, k, rng) {
         const pool = Array.from({ length: total }, (_, i) => i);
         // Fisher-Yates partial shuffle
         for (let i = pool.length - 1; i > pool.length - 1 - k && i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
+            const j = randomInt(rng, i + 1);
             [pool[i], pool[j]] = [pool[j], pool[i]];
         }
         return pool.slice(pool.length - k).sort((a, b) => a - b);
@@ -100,18 +104,19 @@ export class RandomForestRegressor {
         const n = X.length;
         this.nFeatures = X[0].length;
         const maxFeatCount = this._getMaxFeatureCount(this.nFeatures);
+        const rng = createSeededRandom(this.randomState);
 
         this.trees = [];
         this._featureSubsets = [];
 
         for (let t = 0; t < this.nEstimators; t++) {
             // Bootstrap sample
-            const sampleIdx = RandomForestRegressor._bootstrapIndices(n);
+            const sampleIdx = RandomForestRegressor._bootstrapIndices(n, rng);
             const Xb = sampleIdx.map(i => X[i]);
             const yb = sampleIdx.map(i => y[i]);
 
             // Random feature subset
-            const featureSubset = RandomForestRegressor._sampleFeatures(this.nFeatures, maxFeatCount);
+            const featureSubset = RandomForestRegressor._sampleFeatures(this.nFeatures, maxFeatCount, rng);
             this._featureSubsets.push(featureSubset);
 
             // Project data to selected features
@@ -158,7 +163,7 @@ export class RandomForestRegressor {
 
     /**
      * Return model parameters.
-     * @returns {{ nEstimators: number, maxDepth: number, minSamplesSplit: number, maxFeatures: string|number }}
+     * @returns {{ nEstimators: number, maxDepth: number, minSamplesSplit: number, maxFeatures: string|number, randomState: number }}
      */
     getParams() {
         return {
@@ -166,6 +171,7 @@ export class RandomForestRegressor {
             maxDepth: this.maxDepth,
             minSamplesSplit: this.minSamplesSplit,
             maxFeatures: this.maxFeatures,
+            randomState: this.randomState,
         };
     }
 

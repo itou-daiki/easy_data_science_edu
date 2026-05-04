@@ -20,11 +20,11 @@ import { GradientBoostingClassifier } from '../ml/classification/gradient_boosti
 const MODELS = [
     { name: 'ロジスティック回帰', cls: LogisticRegression, params: { maxIter: 500 }, badge: 'LR' },
     { name: '決定木', cls: DecisionTreeClassifier, params: { maxDepth: 5 }, badge: 'Tree' },
-    { name: 'ランダムフォレスト', cls: RandomForestClassifier, params: { nEstimators: 100, maxDepth: 8 }, badge: 'RF' },
+    { name: 'ランダムフォレスト', cls: RandomForestClassifier, params: { nEstimators: 100, maxDepth: 8, randomState: 42 }, badge: 'RF' },
     { name: 'K近傍法', cls: KNNClassifier, params: { nNeighbors: 5 }, badge: 'KNN' },
     { name: 'ナイーブベイズ', cls: GaussianNaiveBayes, params: {}, badge: 'NB' },
-    { name: 'SVM', cls: SVMClassifier, params: { C: 1.0, maxIter: 500 }, badge: 'SVM' },
-    { name: '勾配ブースティング', cls: GradientBoostingClassifier, params: { nEstimators: 100, learningRate: 0.1, maxDepth: 3 }, badge: 'GBM' }
+    { name: 'SVM', cls: SVMClassifier, params: { C: 1.0, maxIter: 500, randomState: 42 }, badge: 'SVM' },
+    { name: '勾配ブースティング', cls: GradientBoostingClassifier, params: { nEstimators: 100, learningRate: 0.1, maxDepth: 3, randomState: 42 }, badge: 'GBM' }
 ];
 
 const PARAM_GRIDS = {
