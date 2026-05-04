@@ -4,6 +4,7 @@
 // ==========================================
 import { createSelect, createStepIndicator, formatNumber, renderPlot, renderActualVsPredicted, renderResidualPlot, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton, makeExportFileName, renderDataPreview, renderSummaryStatistics, downloadJSON, serializeModel, makeModelFileName } from '../utils.js';
 import { buildAnalysisContext, renderAIAssistPanel } from '../ai_assistant.js';
+import { buildAnalysisQualityReport, getAnalysisQualityNotes, renderAnalysisQualityPanel } from '../analysis_quality.js';
 import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
 import { prepareTrainTestFeatures } from '../ml/preprocessing.js';
 import { KFold, crossValidate, gridSearch, permutationImportance, learningCurve } from '../ml/model_selection.js';
@@ -190,7 +191,19 @@ async function runComparison(container, data, characteristics) {
         }
 
         // Save state for tune/predict
-        _state = { XTrain, XTest, yTrain, yTest, featureNames, scaler, encoders, preprocessor, cvFolds: effectiveCvFolds, targetCol, fileName: characteristics.fileName || 'data', rawData: data, characteristics };
+        _state = {
+            XTrain, XTest, yTrain, yTest,
+            featureNames, scaler, encoders, preprocessor,
+            cvFolds: effectiveCvFolds,
+            requestedCvFolds: cvFolds,
+            targetCol,
+            selectedFeatures,
+            preprocessInfo,
+            fileName: characteristics.fileName || 'data',
+            rawData: data,
+            characteristics
+        };
+        _state.qualityReport = createRegressionQualityReport();
 
         // Compute preprocessing info
         const missingCount = selectedFeatures.reduce((sum, col) => {
@@ -247,6 +260,7 @@ async function runComparison(container, data, characteristics) {
                     </div>
                 </div>
             </div>
+            ${renderAnalysisQualityPanel(_state.qualityReport, { title: '分析前の信頼性チェック' })}
         `;
         // Show spinner in progress-area (cleared after training completes)
         progressArea.innerHTML = `
@@ -406,6 +420,24 @@ function renderComparisonResults(container, results, yTest, featureNames) {
     }
 }
 
+function createRegressionQualityReport(result = null) {
+    return buildAnalysisQualityReport({
+        data: _state.rawData,
+        characteristics: _state.characteristics,
+        task: 'regression',
+        targetCol: _state.targetCol,
+        selectedFeatures: _state.selectedFeatures || _state.featureNames || [],
+        requestedCvFolds: _state.requestedCvFolds,
+        effectiveCvFolds: _state.cvFolds,
+        XTrain: _state.XTrain,
+        XTest: _state.XTest,
+        yTrain: _state.yTrain,
+        yTest: _state.yTest,
+        preprocessInfo: _state.preprocessInfo,
+        result
+    });
+}
+
 function showModelDetail(container, result, yTest, featureNames) {
     const evalSection = container.querySelector('#evaluate-section');
     evalSection.style.display = 'block';
@@ -428,6 +460,8 @@ function showModelDetail(container, result, yTest, featureNames) {
         </div>
 
         ${renderRegressionPerformanceDiagnostics(result, yTest)}
+
+        ${renderAnalysisQualityPanel(createRegressionQualityReport(result), { title: '評価信頼性チェック', maxItems: 10 })}
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 2rem;">
             <div><div id="actual-vs-pred-plot"></div></div>
@@ -634,7 +668,8 @@ function showModelDetail(container, result, yTest, featureNames) {
                 adjustedR2: result.adjR2,
                 mae: result.mae,
                 rmse: result.rmse
-            }
+            },
+            notes: getAnalysisQualityNotes(createRegressionQualityReport(result))
         })
     });
 

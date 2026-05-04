@@ -57,8 +57,8 @@ export function setupAIAssistSettingsUI(elements) {
         }
         if (status) {
             status.textContent = message || (active
-                ? '生成AI支援は有効です。APIキーはこのブラウザタブ内にのみ保持されます。'
-                : 'Gemini APIキーを入力すると、分析結果ページで解釈補助を利用できます。');
+                ? '生成AI支援は有効です。「解釈を生成」を押すと、分析文脈の要約がGoogle Gemini APIへ送信されます。APIキーはこのブラウザタブ内にのみ保持されます。'
+                : 'Gemini APIキーを入力すると、分析結果ページで解釈補助を利用できます。送信は有効化後に「解釈を生成」を押した時だけ行われます。');
             status.classList.toggle('active', active);
         }
         modelInput.value = settings.model || DEFAULT_MODEL;
@@ -153,6 +153,10 @@ export function renderAIAssistPanel({ context, title = '生成AI解釈補助' })
             <div class="ai-assist-context">
                 <strong>読み取り対象</strong>
                 <span>${escapeHtml(createContextLine(context))}</span>
+            </div>
+            <div class="ai-assist-privacy-note">
+                <i class="fas fa-lock"></i>
+                <span>実行時、この要約文脈が Google Gemini API へ送信されます。アップロードファイル全体は送信しません。</span>
             </div>
             <button type="button" class="ai-assist-generate">
                 <i class="fas fa-lightbulb"></i> 解釈を生成

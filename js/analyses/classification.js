@@ -4,6 +4,7 @@
 // ==========================================
 import { createSelect, createStepIndicator, formatNumber, renderPlot, renderConfusionMatrix, renderROCCurve, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton, makeExportFileName, renderDataPreview, renderSummaryStatistics, downloadJSON, serializeModel, makeModelFileName } from '../utils.js';
 import { buildAnalysisContext, renderAIAssistPanel } from '../ai_assistant.js';
+import { buildAnalysisQualityReport, getAnalysisQualityNotes, renderAnalysisQualityPanel } from '../analysis_quality.js';
 import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
 import { prepareTrainTestFeatures } from '../ml/preprocessing.js';
 import { StratifiedKFold, crossValidate, gridSearch, permutationImportance, learningCurve } from '../ml/model_selection.js';
@@ -216,7 +217,20 @@ async function runComparison(container, data, characteristics) {
         }
 
         // Save state for tune/predict
-        _state = { XTrain, XTest, yTrain, yTest, featureNames, scaler, encoders, labelEncoder, preprocessor, classes, classLabels, cvFolds: effectiveCvFolds, targetCol, fileName: characteristics.fileName || 'data', rawData: data, characteristics };
+        _state = {
+            XTrain, XTest, yTrain, yTest,
+            featureNames, scaler, encoders, labelEncoder, preprocessor,
+            classes, classLabels,
+            cvFolds: effectiveCvFolds,
+            requestedCvFolds: cvFolds,
+            targetCol,
+            selectedFeatures,
+            preprocessInfo,
+            fileName: characteristics.fileName || 'data',
+            rawData: data,
+            characteristics
+        };
+        _state.qualityReport = createClassificationQualityReport();
 
         // Compute preprocessing info
         const missingCount = selectedFeatures.reduce((sum, col) => {
@@ -273,6 +287,7 @@ async function runComparison(container, data, characteristics) {
                     </div>
                 </div>
             </div>
+            ${renderAnalysisQualityPanel(_state.qualityReport, { title: '分析前の信頼性チェック' })}
         `;
         // Show spinner in progress-area (cleared after training completes)
         const progressArea = container.querySelector('#progress-area');
@@ -453,6 +468,24 @@ function renderComparisonResults(container, results, yTest, featureNames, classe
     }
 }
 
+function createClassificationQualityReport(result = null) {
+    return buildAnalysisQualityReport({
+        data: _state.rawData,
+        characteristics: _state.characteristics,
+        task: 'classification',
+        targetCol: _state.targetCol,
+        selectedFeatures: _state.selectedFeatures || _state.featureNames || [],
+        requestedCvFolds: _state.requestedCvFolds,
+        effectiveCvFolds: _state.cvFolds,
+        XTrain: _state.XTrain,
+        XTest: _state.XTest,
+        yTrain: _state.yTrain,
+        yTest: _state.yTest,
+        preprocessInfo: _state.preprocessInfo,
+        result
+    });
+}
+
 function showModelDetail(container, result, yTest, featureNames, classes, classLabels) {
     const evalSection = container.querySelector('#evaluate-section');
     evalSection.style.display = 'block';
@@ -477,6 +510,8 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
         </div>
 
         ${renderClassificationPerformanceDiagnostics(result, yTest, classLabels)}
+
+        ${renderAnalysisQualityPanel(createClassificationQualityReport(result), { title: '評価信頼性チェック', maxItems: 10 })}
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 2rem;">
             <div id="confusion-matrix-plot"></div>
@@ -695,7 +730,8 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
                 f1: result.f1,
                 auc: result.auc,
                 logLoss: result.ll
-            }
+            },
+            notes: getAnalysisQualityNotes(createClassificationQualityReport(result))
         })
     });
 
