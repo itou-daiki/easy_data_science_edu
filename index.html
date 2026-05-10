@@ -354,6 +354,26 @@
                     </div>
                 </div>
 
+                <!-- 動画分析 -->
+                <div class="category-section category-video">
+                    <div class="category-header">
+                        <div class="category-icon"><i class="fas fa-video"></i></div>
+                        <div class="category-info">
+                            <h3>動画分析（Splyzaライク）</h3>
+                            <p>ローカル動画を読み込み、コマ送り・描画・タグ付け・2動画比較・ポーズ推定をブラウザ上で行います</p>
+                        </div>
+                    </div>
+                    <div class="category-cards">
+                        <div class="feature-card" data-analysis="video_analysis" data-requires="none">
+                            <h3 class="feature-card-title">
+                                <i class="fas fa-film feature-card-icon"></i>
+                                動画分析ツール
+                            </h3>
+                            <p class="feature-card-description">スポーツや行動動画の解析向け。再生速度切替・描画アノテーション・イベント記録・MoveNetによるポーズ推定が可能です</p>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- 予測モード -->
                 <div class="category-section category-predict">
                     <div class="category-header">
@@ -538,6 +558,9 @@
     <!-- TensorFlow.js (for Image/Audio Classification) -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0/dist/mobilenet.min.js"></script>
+
+    <!-- Pose Detection (for Video Analysis) -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
 
     <!-- Custom JavaScript -->
     <script type="module" src="js/main.js"></script>
