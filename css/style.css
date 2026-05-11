@@ -401,6 +401,21 @@ table tr:hover { background: var(--background); }
     gap: 0.5rem; transition: filter 0.2s; box-shadow: var(--shadow-md);
 }
 .btn-analysis:hover { filter: brightness(90%); }
+.btn-analysis:disabled,
+.btn-analysis[disabled] {
+    background: #e2e8f0 !important;
+    color: #94a3b8 !important;
+    box-shadow: none;
+    cursor: not-allowed;
+    filter: none;
+}
+.btn-analysis:disabled:hover,
+.btn-analysis[disabled]:hover { filter: none; }
+.btn-analysis:disabled .va-badge-count,
+.btn-analysis[disabled] .va-badge-count {
+    background: #cbd5e1 !important;
+    color: #64748b !important;
+}
 
 /* === Tabs === */
 .tab-container { display: flex; gap: 0.5rem; margin-bottom: 2rem; border-bottom: 2px solid var(--border-color); }

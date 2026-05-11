@@ -798,6 +798,8 @@ function _renderToolPanes() {
 function _renderDrawPane() {
     const pane = document.getElementById('va-pane-draw');
     pane.innerHTML = `
+        <div id="va-draw-disabled-msg" class="va-info-banner" style="display:none;"><i class="fas fa-info-circle"></i> Step 1 でメディアを読み込むと描画を開始できます。</div>
+        <div id="va-draw-block">
         <div class="va-tool-section">
             <h4>描画ツール</h4>
             <div class="va-draw-toolbar">
@@ -832,6 +834,7 @@ function _renderDrawPane() {
         <div class="va-tool-help">
             <p><strong>使い方</strong>: 「ツール対象」で動画/画像を選んでから上のメディアをドラッグして描画します。
             動画では現在時刻から指定秒数だけ表示され、再生中に自動でフェードアウト。画像ではずっと表示されたままになります。</p>
+        </div>
         </div>
     `;
     pane.querySelectorAll('.va-draw-tool').forEach(btn => {
@@ -1430,6 +1433,23 @@ function _refreshActiveDependentUI() {
         tagDisabled.style.display = isVideo ? 'none' : '';
         if (!t.media) tagDisabled.innerHTML = '<i class="fas fa-info-circle"></i> Step 1 で動画を読み込むとタグ／イベント記録が利用できます。';
         else tagDisabled.innerHTML = '<i class="fas fa-info-circle"></i> 画像にはタグ付けできません。動画ファイルを読み込んでください。';
+    }
+
+    // 描画タブ：メディア未読込時はガイドのみ表示
+    const drawBlock = document.getElementById('va-draw-block');
+    const drawDisabled = document.getElementById('va-draw-disabled-msg');
+    const hasMedia = !!t.media;
+    if (drawBlock) drawBlock.style.display = hasMedia ? '' : 'none';
+    if (drawDisabled) drawDisabled.style.display = hasMedia ? 'none' : '';
+
+    // パネルヘッダのアクションボタン：メディア読込前は冗長なので隠す（ドロップゾーンのCTAを主導線にする）
+    const root = document.querySelector('.va-root');
+    if (root) {
+        ['A', 'B'].forEach(tg => {
+            const tt = _state.targets[tg];
+            const actions = root.querySelector(`.va-panel[data-target="${tg}"] .va-panel-actions`);
+            if (actions) actions.style.display = tt.media ? 'flex' : 'none';
+        });
     }
 
     _refreshPoseChart();
