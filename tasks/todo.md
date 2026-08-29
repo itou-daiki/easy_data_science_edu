@@ -199,3 +199,104 @@
 - 教育用途なので「これは何のため」のキャプションを各機能近くに添える。
 - 既存の `ai_assistant.js` との結合は今回は行わない（範囲外）。
 - 大規模ファイル（>1000行想定）になるため、`js/analyses/video_analysis/` ディレクトリ分割も視野に入れて初期から関数を細分化する。
+
+---
+
+# Iteration 24: Web一次資料に基づく10回の自立改善ループ
+
+## 目標
+
+ブラウザ完結・教育用途・純JavaScript実装という本システムの意図を維持しながら、公式仕様・一次資料と実際の挙動を照合し、分析の妥当性と学習体験を10回の反復で改善する。
+
+## 10ループ
+
+- [x] 1. 評価設計: 学習・検証・テストの分離と交差検証の表示を再監査し、誤解を招く評価を修正する
+- [x] 2. 回帰指標: 小標本・定数目的変数・外れ値を含む場合の指標計算と説明を改善する
+- [x] 3. 分類指標: 不均衡データ、多クラス、確率を扱う指標と表示の妥当性を改善する
+- [x] 4. 再現性: 分割・CV・モデル・置換重要度まで乱数シードの伝播を検証し、欠落を修正する
+- [x] 5. 前処理: 欠損・カテゴリ未知値・定数列・非有限値への耐性と情報保持を改善する
+- [x] 6. 生成AI支援: Gemini API仕様、送信範囲、プロンプト耐性、誤解防止表示を改善する
+- [x] 7. アクセシビリティ: キーボード、フォーカス、状態通知、ラベル、コントラストを改善する
+- [x] 8. 性能・資源管理: 大規模データ、Object URL、重い処理、CDN読込の挙動を改善する
+- [x] 9. 学習支援: 統計的な限界、予測と因果の区別、不確実性の読み方を画面とマニュアルへ反映する
+- [x] 10. 総合回帰試験: 日英、主要分析、AI、メディア、モバイル、コンソールを通しで再検証する
+
+## 成功基準
+
+- 各ループに公式仕様または一次資料の根拠、確認した問題、修正、検証結果がある
+- ユーザーデータを外部へ送信しない既定動作と、ブラウザ完結の設計を維持する
+- 分析結果が性能の過大評価、因果推論、確率の校正について誤解を誘わない
+- 既存の主要ワークフローと日本語・英語表示を壊さない
+- 全JavaScript構文、差分整合性、ブラウザコンソール、主要画面の回帰確認を通す
+
+## レビュー
+
+1. **評価設計**: scikit-learnの[データリーク対策](https://scikit-learn.org/stable/common_pitfalls.html)と[交差検証](https://scikit-learn.org/stable/modules/cross_validation.html)を基準に、前処理を各foldの訓練側だけでfitするCVへ統一した。最終テストは候補確定まで封印し、開示後の再選択・アンサンブルは探索的評価と明示した。
+2. **回帰指標**: R2の1標本・定数目的変数を定義に沿って処理し、R2・MAE・RMSEへ再現可能なpercentile bootstrap区間を追加した。Adjusted R2はOLSで定義可能な場合だけ表示する。OLSはMath.jsの[Moore-Penrose擬似逆行列](https://mathjs.org/docs/reference/functions/pinv.html)へ変更し、重複列や`p >= n`でも有限の最小二乗解を返すようにした。
+3. **分類指標**: scikit-learnの[モデル評価](https://scikit-learn.org/stable/modules/model_evaluation.html)、[ROC AUC](https://scikit-learn.org/stable/modules/generated/sklearn.metrics.roc_auc_score.html)、[確率校正](https://scikit-learn.org/stable/modules/calibration.html)に合わせ、多クラスOvR AUC、Macro指標、クラス整列済み確率を実装した。未校正SVMではLog Lossを表示しない。多クラスPDPとSHAPは共通の説明対象クラスを選び、同じモデル出力を説明するよう統一した。
+4. **再現性**: 分割、fold、ブートストラップ、ランダムフォレスト、勾配ブースティング、SVM、学習曲線へseedを伝播した。RFは行をbootstrapし、特徴量は各ノードで再抽出するよう修正した。
+5. **前処理**: NaN・Infinity、未知カテゴリ、欠損、少数クラスに対する耐性を追加した。カテゴリ特徴量のLabel Encodingが人工的順序を入れる限界を特定し、Iteration 25でfold内One-Hot Encodingへ置き換える課題として引き継いだ。
+6. **生成AI支援**: Geminiの[APIキー](https://ai.google.dev/gemini-api/docs/api-key)、[generateContent](https://ai.google.dev/api/generate-content)、[安全性ガイド](https://ai.google.dev/gemini-api/docs/safety-guidance)を確認した。キーはメモリだけに保持し、行プレビュー送信は既定OFF、入力長制限・タイムアウト・finishReason表示・データ境界と命令無視ルールを追加した。クリップボード保存とネットワーク送信を区別し、2026年9月のStandard key停止とAuth key移行も案内した。
+7. **アクセシビリティ**: [WCAG 2.2](https://www.w3.org/TR/WCAG22/)と[モーダルダイアログAPG](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/)に沿って、skip link、main、dialog属性、フォーカストラップ、Esc、フォーカス復帰、live region、キーボード操作、reduced motionを追加した。動画の表示モードはタブではなく`aria-pressed`付きセグメント操作として意味を揃えた。
+8. **性能・資源管理**: 重いCDN依存を用途別に遅延読込し、バージョン固定とSRIを追加した。Plotly、TensorFlowモデル、メディア、イベント、Object URLを画面離脱時に解放し、[revokeObjectURL](https://developer.mozilla.org/en-US/docs/Web/API/URL/revokeObjectURL_static)の要件へ対応した。
+9. **学習支援**: [learning_curve](https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.learning_curve.html)を前処理込み・層化・全クラス保持へ修正した。fold間SDは信頼区間でないこと、無作為分割のIID前提、時系列・反復測定・グループ構造、予測と因果の違い、AUCと校正の違いを画面とマニュアルへ反映した。
+10. **総合回帰試験**: 回帰・3クラス分類の比較、テスト開示、Blend、Stack、日英切替、AIキーの非永続化、キーボード操作、デスクトップ・モバイル表示をPlaywrightで確認した。多クラスPDP/SHAPの対象切替、動画モードの押下状態、ランク不足OLSも追加確認した。コンソールはエラー・警告0件。`node tests/ml_reliability.test.mjs`、全JSの`node --check`、`git diff --check`も成功した。
+
+### 残存リスク
+
+- 無作為分割だけでは扱えなかった時系列・グループ構造はIteration 25で専用分割を追加した。ただし、利用者が分割列を誤って選ぶと独立性は保証できない。
+- カテゴリ特徴量はIteration 25でfold内One-Hot Encodingへ移行した。高カーディナリティ列では特徴量数が大きくなるため、列の意味と粒度を別途確認する。
+- bootstrap区間は小標本でも万能ではなく、独立同分布を前提とする近似である。
+- ブラウザから直接Geminiへ接続する以上、APIキーをサーバー側秘密情報にはできない。共有端末では再読み込みで消去し、制限付きキーを使う。
+- 本アプリの指標・AI解釈は教育支援であり、医療・採用など高リスク意思決定の保証には用いない。
+
+---
+
+# Iteration 25: Web一次資料に基づく第2回10ループ監査
+
+## 目標
+
+Iteration 24で是正した評価リーク、再現性、AI安全性、アクセシビリティを基準線とし、残存制約と変更後の回帰を別の10周で監査する。ブラウザ完結・教育用途を維持しながら、妥当性を実装で改善できる項目はテスト付きで修正し、未実装の制約は利用者が判断できる形で明示する。
+
+## 10ループ
+
+- [x] 1. カテゴリ特徴量: Label Encodingの人工的順序を解消できるか、One-Hot化と未知カテゴリ処理を再設計する
+- [x] 2. 分割戦略: IID、時系列、同一対象の反復測定を区別し、誤用防止または適切な分割を追加する
+- [x] 3. 回帰の不確実性: 点予測、区間、残差、ベースライン、ランク不足時の表示を再監査する
+- [x] 4. 分類の不均衡: Balanced Accuracy、PR系指標、閾値、校正、多クラス表示を再監査する
+- [x] 5. モデル解釈: Permutation Importance、PDP、SHAP、カテゴリ特徴量、対象クラスの意味を再検証する
+- [x] 6. メディア学習: 画像・音声・動画の分割、指標、過学習表示、モデル・テンソル解放を再監査する
+- [x] 7. 入出力安全性: CSV/Excel解析、CSV Injection、XSS、モデルJSON検証、巨大入力への耐性を改善する
+- [x] 8. 生成AI安全性: 送信前確認、個人情報、キー移行、レート制限、エラー、会話分離を再検証する
+- [x] 9. Web品質: 日英整合、キーボード、フォーカス、ARIA、モバイル、CDN、性能を再監査する
+- [x] 10. 総合回帰試験: 表形式・メディア・AI・日英・保存読込を実ブラウザと自動テストで検証する
+
+## 成功基準
+
+- 各ループに一次資料、確認した挙動、修正または明示した制約、検証結果がある
+- Iteration 24の評価封印、fold内前処理、seed、AIの既定非送信を壊さない
+- 数値結果と教育説明が同じ統計概念を指し、アルゴリズム固有の限界を隠さない
+- 新規の数値処理・パーサ・変換には境界値または不変条件テストを追加する
+- 全JS構文、信頼性テスト、差分整合性、主要画面、コンソールを通す
+
+## レビュー
+
+1. **カテゴリ特徴量**: scikit-learnの[OneHotEncoder](https://scikit-learn.org/stable/modules/generated/sklearn.preprocessing.OneHotEncoder.html)を基準に、人工的な大小関係を作るLabel Encodingを廃止した。カテゴリ一覧・欠損補完・スケーラーを各foldの訓練側だけでfitし、検証時の未知カテゴリは全0列へ写像する。保存モデルにも完全な前処理仕様を含め、再読込後の予測一致を確認した。
+2. **分割戦略**: [GroupKFold](https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.GroupKFold.html)と[TimeSeriesSplit](https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.TimeSeriesSplit.html)を参考に、無作為、グループ非重複、時間順のholdout/CVを選択可能にした。時間順にはgapを設け、構造化分割で不適切なStackingを無効化した。
+3. **回帰の不確実性**: NISTの[モデル検証](https://www.itl.nist.gov/div898/handbook/pmd/section4/pmd44.htm)と[予測の不確実性](https://itl.nist.gov/div898/handbook/pmd/section1/pmd132.htm)に照らし、独立テストではR2・MAE・RMSE、ベースライン比較、残差図、再現可能なbootstrap区間を表示する。Adjusted R2はOLSの訓練診断だけへ移し、個別予測は点予測であって予測区間ではないと明記した。
+4. **分類の不均衡**: [Average Precision](https://scikit-learn.org/stable/modules/generated/sklearn.metrics.average_precision_score.html)に合わせて非補間APを追加し、MCC、PR曲線、陽性クラス、陽性率ベースラインを表示した。二値分類の既定陽性は少数クラスとし、多クラスMacro指標との意味を分離した。
+5. **モデル解釈**: SHAP風近似をseed付きの順列経路法へ修正し、基準値と寄与和が対象予測へ一致する局所加法性を境界値テストで確認した。Permutation Importance、PDP、SHAPの対象データ・対象クラス・カテゴリ展開後の特徴量名を揃えた。
+6. **メディア学習**: 画像・音声は再現可能な層化検証へ統一し、正規化統計を訓練データだけから算出する。検証Accuracyとクラス別Recallを表示し、「確率」ではなく未校正スコアと表記した。TensorFlowテンソル、モデル、Object URL、録音資源を解放し、画像15 MiB・音声25 MiB/30秒などの入力上限を追加した。
+7. **入出力安全性**: OWASPの[XSS対策](https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html)と[DOM XSS対策](https://cheatsheetseries.owasp.org/cheatsheets/DOM_based_XSS_Prevention_Cheat_Sheet.html)を基準に、列名・値・注釈のHTML出力をエスケープした。表データ25 MiB/5万行/500列/200万セル、モデルJSON25 MiB、注釈JSON5 MiBの上限と深さ・配列・数値・次元検証、CSV数式注入対策を追加し、SheetJSを0.20.3へ固定してSRIを付与した。
+8. **生成AI安全性**: 行プレビュー送信は既定OFFのまま維持し、送信前に機微情報を含まないことの明示確認と送信コンテキストのプレビューを追加した。単一リクエスト制御、状態変更時の中断、再試行、タイムアウト、古い応答の破棄を実装し、ブラウザ入力キーはサーバー秘密情報にならないことを表示した。
+9. **Web品質**: 日英の新規文言、マニュアル、ARIAタブ、モーダルのフォーカス復帰、AIパネルのモバイル初期折りたたみを確認した。320px幅で装飾疑似要素が操作を遮る問題と、英語の前処理・品質カードが横にはみ出す問題を修正し、`JP`/`EN`の表示と横超過0を実ブラウザで確認した。
+10. **総合回帰試験**: 回帰モデル比較、封印テスト開示、OLSの訓練Adjusted R2、動画タブ、AI設定、日英マニュアル、モバイル操作をブラウザで確認した。全JS構文、ML信頼性、14モデル保存読込、i18n、差分整合性の自動試験を通し、ブラウザの警告・エラーは0件だった。
+
+### 残存リスク
+
+- グループ・時間順分割の妥当性は、利用者が選ぶ列、時間順、gapが研究設計を正しく表すことに依存する。階層データや複数施設の交差構造を自動判定するものではない。
+- One-Hot Encodingは未知カテゴリを全0として安全に処理するが、高カーディナリティ列では次元が急増する。カテゴリ統合や外部妥当性の判断は利用者に残る。
+- bootstrap区間はテスト標本の再標本化による指標の近似区間であり、個々の予測値の予測区間ではない。小標本・依存データでは過信しない。
+- 画像・音声の検証データは学習から分離したが、独立した外部テストではない。未校正スコアを確率として意思決定へ使わない。
+- ブラウザからGeminiへ直接送る設計ではAPIキーを完全な秘密情報にできない。制限付きキーを用い、個人・学生・機密データを送信しない。
+- 本アプリは学習支援用であり、医療・採用・与信など高リスク判断や因果効果の保証には使わない。

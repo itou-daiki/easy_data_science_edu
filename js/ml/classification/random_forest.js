@@ -5,7 +5,7 @@
  */
 
 import { DecisionTreeClassifier } from './decision_tree.js';
-import { createSeededRandom, randomInt, shuffleCopy } from '../random.js';
+import { createSeededRandom, randomInt } from '../random.js';
 
 /**
  * @class RandomForestClassifier
@@ -26,50 +26,24 @@ export class RandomForestClassifier {
         this.maxFeatures = maxFeatures;
         this.randomState = randomState;
         this.trees = [];
-        this.featureSubsets = [];
         this.classes = null;
         this.nFeatures = null;
     }
 
     /**
-     * Determine the number of features to sample per tree.
-     * @private
-     * @param {number} totalFeatures
-     * @returns {number}
-     */
-    _getMaxFeatureCount(totalFeatures) {
-        if (typeof this.maxFeatures === 'number') {
-            return Math.min(this.maxFeatures, totalFeatures);
-        }
-        if (this.maxFeatures === 'log2') {
-            return Math.max(1, Math.floor(Math.log2(totalFeatures)));
-        }
-        return Math.max(1, Math.floor(Math.sqrt(totalFeatures)));
-    }
-
-    /**
-     * Generate a bootstrap sample with random feature subset.
+     * Generate a bootstrap sample.
      * @private
      * @param {number[][]} X
      * @param {number[]} y
-     * @param {number} nFeatSample
      * @param {() => number} rng
-     * @returns {{ X: number[][], y: number[], featureIdx: number[] }}
+     * @returns {{ X: number[][], y: number[] }}
      */
-    _bootstrapSample(X, y, nFeatSample, rng) {
+    _bootstrapSample(X, y, rng) {
         const n = X.length;
-        const d = X[0].length;
-
         const sampleIdx = Array.from({ length: n }, () => randomInt(rng, n));
-
-        const allFeatures = Array.from({ length: d }, (_, i) => i);
-        const shuffled = shuffleCopy(allFeatures, rng);
-        const featureIdx = shuffled.slice(0, nFeatSample).sort((a, b) => a - b);
-
-        const Xb = sampleIdx.map(i => featureIdx.map(f => X[i][f]));
+        const Xb = sampleIdx.map(i => [...X[i]]);
         const yb = sampleIdx.map(i => y[i]);
-
-        return { X: Xb, y: yb, featureIdx };
+        return { X: Xb, y: yb };
     }
 
     /**
@@ -86,36 +60,24 @@ export class RandomForestClassifier {
         this.classes = [...new Set(y)].sort((a, b) => a - b);
         this.nFeatures = X[0].length;
         this.trees = [];
-        this.featureSubsets = [];
-
-        const nFeatSample = this._getMaxFeatureCount(this.nFeatures);
         const rng = createSeededRandom(this.randomState);
 
         for (let i = 0; i < this.nEstimators; i++) {
-            const sample = this._bootstrapSample(X, y, nFeatSample, rng);
+            const sample = this._bootstrapSample(X, y, rng);
 
             const tree = new DecisionTreeClassifier({
                 maxDepth: this.maxDepth,
-                minSamplesSplit: this.minSamplesSplit
+                minSamplesSplit: this.minSamplesSplit,
+                maxFeatures: this.maxFeatures,
+                randomState: randomInt(rng, 0x7fffffff),
+                classes: this.classes
             });
             tree.fit(sample.X, sample.y);
 
             this.trees.push(tree);
-            this.featureSubsets.push(sample.featureIdx);
         }
 
         return this;
-    }
-
-    /**
-     * Project a row to the feature subset used by a specific tree.
-     * @private
-     * @param {number[]} row
-     * @param {number} treeIdx
-     * @returns {number[]}
-     */
-    _projectRow(row, treeIdx) {
-        return this.featureSubsets[treeIdx].map(f => row[f]);
     }
 
     /**
@@ -134,10 +96,11 @@ export class RandomForestClassifier {
             const avgProba = new Array(nClasses).fill(0);
 
             for (let t = 0; t < this.trees.length; t++) {
-                const projected = [this._projectRow(row, t)];
-                const proba = this.trees[t].predictProba(projected)[0];
-                for (let c = 0; c < nClasses; c++) {
-                    avgProba[c] += proba[c];
+                const tree = this.trees[t];
+                const proba = tree.predictProba([row])[0];
+                for (let localIndex = 0; localIndex < tree.classes.length; localIndex++) {
+                    const globalIndex = this.classes.indexOf(tree.classes[localIndex]);
+                    if (globalIndex >= 0) avgProba[globalIndex] += proba[localIndex] || 0;
                 }
             }
 
@@ -184,9 +147,8 @@ export class RandomForestClassifier {
             const treeImportance = this.trees[t].getFeatureImportance();
             if (!treeImportance) continue;
 
-            const featureIdx = this.featureSubsets[t];
-            for (let j = 0; j < featureIdx.length; j++) {
-                importance[featureIdx[j]] += treeImportance[j] || 0;
+            for (let j = 0; j < this.nFeatures; j++) {
+                importance[j] += treeImportance[j] || 0;
             }
         }
 

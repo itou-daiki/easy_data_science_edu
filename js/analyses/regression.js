@@ -7,8 +7,8 @@ import { buildAnalysisContext, renderAIAssistPanel } from '../ai_assistant.js';
 import { buildAnalysisQualityReport, getAnalysisQualityNotes, renderAnalysisQualityPanel } from '../analysis_quality.js';
 import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
 import { prepareTrainTestFeatures, prepareTrainValidationFeatures } from '../ml/preprocessing.js';
-import { KFold, crossValidateWithPreprocessing, gridSearchWithPreprocessing, permutationImportance, learningCurve } from '../ml/model_selection.js';
-import { meanAbsoluteError, meanSquaredError, rootMeanSquaredError, rSquared, adjustedRSquared } from '../ml/metrics.js';
+import { KFold, crossValidateWithPreprocessing, gridSearchWithPreprocessing, permutationImportance, learningCurveWithPreprocessing } from '../ml/model_selection.js';
+import { meanAbsoluteError, meanSquaredError, rootMeanSquaredError, rSquared, adjustedRSquared, bootstrapMetricInterval } from '../ml/metrics.js';
 import { LinearRegression } from '../ml/regression/linear.js';
 import { RidgeRegression } from '../ml/regression/ridge.js';
 import { LassoRegression } from '../ml/regression/lasso.js';
@@ -41,9 +41,24 @@ const STEPS = ['Setup', 'Preprocess', 'Compare', 'Create', 'Tune', 'Interpret', 
 // Module-level state for sharing data between steps
 let _state = {};
 
+function getSplitOptions() {
+    return {
+        splitStrategy: _state.splitStrategy || 'random',
+        splitColumn: _state.splitColumn || null,
+        splitGap: _state.splitGap || 0,
+    };
+}
+
+function getCvMethodLabel() {
+    if (_state.splitStrategy === 'group') return 'Group K-Fold（グループ非重複）';
+    if (_state.splitStrategy === 'time') return `時系列 expanding-window CV（gap=${_state.splitGap || 0}行）`;
+    return 'K-Fold交差検証';
+}
+
 export function render(container, data, characteristics) {
     _state = {};
     const numCols = characteristics.numericColumns;
+    const allCols = characteristics.allColumns || Object.keys(data[0]);
 
     container.innerHTML = `
         <h2><i class="fas fa-robot" style="color: #d97706;"></i> 回帰モデル比較 (AutoML)</h2>
@@ -60,7 +75,7 @@ export function render(container, data, characteristics) {
 
         <div id="setup-section" class="model-config">
             <h3><i class="fas fa-cog"></i> Step 1: セットアップ</h3>
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.5rem; margin: 1.5rem 0;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1.5rem; margin: 1.5rem 0;">
                 <div>
                     <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">
                         目的変数（予測したい数値変数）:
@@ -76,6 +91,22 @@ export function render(container, data, characteristics) {
                         <option value="0.25">25%</option>
                         <option value="0.3" selected>30%</option>
                     </select>
+                </div>
+                <div>
+                    <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">データ分割方法:</label>
+                    <select id="split-strategy-select" class="form-select">
+                        <option value="random" selected>無作為（独立な行）</option>
+                        <option value="group">グループ非重複</option>
+                        <option value="time">時系列（未来をテスト）</option>
+                    </select>
+                </div>
+                <div id="split-column-wrapper" style="display: none;">
+                    <label id="split-column-label" style="font-weight: 600; display: block; margin-bottom: 0.5rem;">分割列:</label>
+                    <select id="split-column-select" class="form-select"></select>
+                </div>
+                <div id="split-gap-wrapper" style="display: none;">
+                    <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">時系列gap（行数）:</label>
+                    <input id="split-gap-input" type="number" class="form-select" min="0" max="1000" value="0" step="1">
                 </div>
                 <div>
                     <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">
@@ -117,6 +148,11 @@ export function render(container, data, characteristics) {
     const btnCompare = container.querySelector('#btn-compare');
     const featureSelection = container.querySelector('#feature-selection');
     const featureChips = container.querySelector('#feature-chips');
+    const splitStrategySelect = container.querySelector('#split-strategy-select');
+    const splitColumnWrapper = container.querySelector('#split-column-wrapper');
+    const splitColumnLabel = container.querySelector('#split-column-label');
+    const splitColumnSelect = container.querySelector('#split-column-select');
+    const splitGapWrapper = container.querySelector('#split-gap-wrapper');
 
     targetSelect.addEventListener('change', () => {
         const target = targetSelect.value;
@@ -126,10 +162,25 @@ export function render(container, data, characteristics) {
             return;
         }
 
-        const features = numCols.filter(c => c !== target);
+        const strategy = splitStrategySelect.value;
+        const previousSplitColumn = splitColumnSelect.value;
+        const splitCandidates = allCols.filter(column => column !== target);
+        if (strategy !== 'random') {
+            splitColumnSelect.innerHTML = splitCandidates.map(column =>
+                `<option value="${_escapeHtml(column)}" ${column === previousSplitColumn ? 'selected' : ''}>${_escapeHtml(column)}</option>`
+            ).join('');
+            splitColumnLabel.textContent = strategy === 'time' ? '時刻列:' : 'グループ列:';
+            splitColumnWrapper.style.display = 'block';
+            splitGapWrapper.style.display = strategy === 'time' ? 'block' : 'none';
+        } else {
+            splitColumnWrapper.style.display = 'none';
+            splitGapWrapper.style.display = 'none';
+        }
+        const splitColumn = strategy === 'random' ? null : splitColumnSelect.value;
+        const features = allCols.filter(c => c !== target && c !== splitColumn);
         featureChips.innerHTML = features.map(f =>
-            `<label class="variable-chip selected" data-value="${f}">
-                <input type="checkbox" value="${f}" checked style="display:none;"> <span data-i18n-ignore>${f}</span>
+            `<label class="variable-chip selected">
+                <input type="checkbox" value="${_escapeHtml(f)}" checked style="display:none;"> <span data-i18n-ignore>${_escapeHtml(f)}</span>
             </label>`
         ).join('');
 
@@ -144,6 +195,9 @@ export function render(container, data, characteristics) {
         featureSelection.style.display = 'block';
         btnCompare.disabled = false;
     });
+
+    splitStrategySelect.addEventListener('change', () => targetSelect.dispatchEvent(new Event('change')));
+    splitColumnSelect.addEventListener('change', () => targetSelect.dispatchEvent(new Event('change')));
 
     btnCompare.addEventListener('click', () => runComparison(container, data, characteristics));
 
@@ -167,6 +221,9 @@ async function runComparison(container, data, characteristics) {
     const targetCol = container.querySelector('#target-select').value;
     const testSize = parseFloat(container.querySelector('#test-size-select').value);
     const cvFolds = parseInt(container.querySelector('#cv-fold-select').value);
+    const splitStrategy = container.querySelector('#split-strategy-select').value;
+    const splitColumn = splitStrategy === 'random' ? null : container.querySelector('#split-column-select').value;
+    const splitGap = splitStrategy === 'time' ? parseInt(container.querySelector('#split-gap-input').value) || 0 : 0;
     const selectedFeatures = Array.from(container.querySelectorAll('#feature-chips input:checked')).map(cb => cb.value);
 
     if (selectedFeatures.length === 0) {
@@ -197,12 +254,18 @@ async function runComparison(container, data, characteristics) {
             selectedFeatures,
             task: 'regression',
             testSize,
-            randomState: 42
+            randomState: 42,
+            splitStrategy,
+            splitColumn,
+            splitGap,
         });
 
-        const effectiveCvFolds = Math.min(cvFolds, XTrain.length);
+        const maxStructureFolds = splitStrategy === 'group'
+            ? new Set(trainRows.map(row => row[splitColumn])).size
+            : Math.floor(XTrain.length / 2);
+        const effectiveCvFolds = Math.min(cvFolds, maxStructureFolds, Math.floor(XTrain.length / 2));
         if (effectiveCvFolds < 2) {
-            throw new Error('交差検証には訓練データが2件以上必要です。');
+            throw new Error('R²を使う交差検証には、各検証foldを2件以上にするため訓練データが4件以上必要です。');
         }
 
         // Save state for tune/predict
@@ -213,12 +276,17 @@ async function runComparison(container, data, characteristics) {
             requestedCvFolds: cvFolds,
             targetCol,
             selectedFeatures,
+            splitStrategy,
+            splitColumn,
+            splitGap,
             preprocessInfo,
             trainRows,
             testRows,
             fileName: characteristics.fileName || 'data',
             rawData: data,
-            characteristics
+            characteristics,
+            holdoutRevealed: false,
+            holdoutReused: false
         };
         _state.qualityReport = createRegressionQualityReport();
 
@@ -238,42 +306,42 @@ async function runComparison(container, data, characteristics) {
                 <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; color: #166534;">
                     <i class="fas fa-magic" style="margin-right: 0.5rem;"></i>Step 2: 前処理 (自動完了)
                 </h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1.5rem;">
-                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                <div class="preprocess-summary-grid">
+                    <div class="preprocess-summary-item">
                         <i class="fas fa-check-circle"></i>
-                        <span>目的変数: <strong data-i18n-ignore>${targetCol}</strong></span>
+                        <span>目的変数: <strong data-i18n-ignore>${_escapeHtml(targetCol)}</strong></span>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                    <div class="preprocess-summary-item">
                         <i class="fas fa-check-circle"></i>
                         <span>特徴量: <strong data-i18n-en="${featureNames.length}">${featureNames.length}個</strong></span>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                    <div class="preprocess-summary-item">
                         <i class="fas fa-check-circle"></i>
                         <span>欠損値処理: ${missingCount > 0 ? missingCount + '個を平均値で補完' : '欠損値なし'}</span>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                    <div class="preprocess-summary-item">
                         <i class="fas fa-check-circle"></i>
-                        <span>カテゴリ変数: ${categoricalCount > 0 ? categoricalCount + '列をLabel Encoding' : 'エンコード不要'}</span>
+                        <span>カテゴリ変数: ${categoricalCount > 0 ? categoricalCount + '列をOne-Hot Encoding' : 'エンコード不要'}</span>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                    <div class="preprocess-summary-item">
                         <i class="fas fa-check-circle"></i>
                         <span>外れ値除去: ${outlierRows > 0 ? outlierRows + '行をIQR法で除去' : '外れ値なし'}</span>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                    <div class="preprocess-summary-item">
                         <i class="fas fa-check-circle"></i>
-                        <span>特徴量変換: ${transformed.length > 0 ? transformed.join(', ') + ' にlog変換' : '変換不要'}</span>
+                        <span>特徴量変換: ${transformed.length > 0 ? _escapeHtml(transformed.join(', ')) + ' にlog変換' : '変換不要'}</span>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                    <div class="preprocess-summary-item">
                         <i class="fas fa-check-circle"></i>
-                        <span>多重共線性: ${removedMulti.length > 0 ? removedMulti.join(', ') + ' を除去' : '問題なし'}</span>
+                        <span>多重共線性: ${removedMulti.length > 0 ? _escapeHtml(removedMulti.join(', ')) + ' を除去' : '問題なし'}</span>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                    <div class="preprocess-summary-item">
                         <i class="fas fa-check-circle"></i>
                         <span>スケーリング: ${scalingApplied ? 'StandardScaler (平均0, 分散1)' : 'なし'}</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
                         <i class="fas fa-check-circle"></i>
-                        <span>データ分割: 訓練${XTrain.length}件 / テスト${XTest.length}件</span>
+                        <span>データ分割: 訓練${XTrain.length}件 / テスト${XTest.length}件（${getCvMethodLabel()}）${preprocessInfo.splitGapRows ? ` / gap除外${preprocessInfo.splitGapRows}件` : ''}</span>
                     </div>
                 </div>
             </div>
@@ -304,7 +372,6 @@ async function runComparison(container, data, characteristics) {
             try {
                 const model = new modelDef.cls(modelDef.params);
                 model.fit(XTrain, yTrain);
-                const yPred = model.predict(XTest);
 
                 // Cross-validation with preprocessing fitted inside each fold.
                 const cvScores = crossValidateWithPreprocessing(modelDef.cls, _state.trainRows, _state.targetCol, {
@@ -312,27 +379,25 @@ async function runComparison(container, data, characteristics) {
                     cv: _state.cvFolds,
                     scoring: 'r2',
                     task: 'regression',
-                    selectedFeatures: _state.selectedFeatures
+                    selectedFeatures: _state.selectedFeatures,
+                    ...getSplitOptions()
                 });
                 const cvMean = cvScores.reduce((a, b) => a + b, 0) / cvScores.length;
                 const cvStd = Math.sqrt(cvScores.reduce((a, v) => a + (v - cvMean) ** 2, 0) / cvScores.length);
-
-                const mae = meanAbsoluteError(yTest, yPred);
-                const mse = meanSquaredError(yTest, yPred);
-                const rmse = rootMeanSquaredError(yTest, yPred);
-                const r2 = rSquared(yTest, yPred);
-                const adjR2 = safeAdjustedRSquared(yTest, yPred, featureNames.length);
-                const baseline = computeRegressionBaseline(_state.yTrain, yTest);
+                const trainAdjustedR2 = modelDef.badge === 'Linear'
+                    ? safeAdjustedRSquared(yTrain, model.predict(XTrain), featureNames.length)
+                    : null;
 
                 results.push({
                     name: modelDef.name,
                     badge: modelDef.badge,
                     cls: modelDef.cls,
                     model,
-                    mae, mse, rmse, r2, adjR2,
-                    baseline,
+                    mae: null, mse: null, rmse: null, r2: null, trainAdjustedR2,
+                    baseline: null,
                     cvMean, cvStd, cvScores,
-                    yPred,
+                    yPred: null,
+                    holdoutEvaluated: false,
                     featureImportance: model.getFeatureImportance ? model.getFeatureImportance() : null
                 });
             } catch (err) {
@@ -342,7 +407,7 @@ async function runComparison(container, data, characteristics) {
                     badge: modelDef.badge,
                     cls: modelDef.cls,
                     model: null,
-                    mae: Infinity, mse: Infinity, rmse: Infinity, r2: -Infinity, adjR2: -Infinity,
+                    mae: Infinity, mse: Infinity, rmse: Infinity, r2: -Infinity, trainAdjustedR2: null,
                     cvMean: -Infinity, cvStd: 0, cvScores: [],
                     yPred: null,
                     error: err.message
@@ -356,7 +421,7 @@ async function runComparison(container, data, characteristics) {
 
         renderComparisonResults(container, results, yTest, featureNames);
     } catch (error) {
-        progressArea.innerHTML = `<p class="error-message"><i class="fas fa-exclamation-triangle"></i> エラー: ${error.message}</p>`;
+        progressArea.innerHTML = `<p class="error-message"><i class="fas fa-exclamation-triangle"></i> エラー: ${_escapeHtml(error.message)}</p>`;
         console.error(error);
     }
 }
@@ -369,7 +434,8 @@ function renderComparisonResults(container, results, yTest, featureNames) {
     let html = `
         <h3 style="margin-top: 1rem;"><i class="fas fa-trophy" style="color: #d97706;"></i> モデル比較結果</h3>
         <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-            ${_state.cvFolds}-Fold 交差検証スコア（foldごとに前処理をfit、参考値）でソートしています。テストデータ (${yTest.length} サンプル) での評価結果も併記。
+            ${_state.cvFolds}-Fold ${getCvMethodLabel()}（foldごとに前処理をfit）の平均でソートしています。fold間SDはばらつきの記述であり、信頼区間ではありません。
+            最終テスト ${yTest.length} 件はモデル選択が終わるまで未開封です。
         </p>
         <div class="table-container">
             <table class="table model-comparison-table">
@@ -377,11 +443,8 @@ function renderComparisonResults(container, results, yTest, featureNames) {
                     <tr>
                         <th>順位</th>
                         <th>モデル</th>
-                        <th>CV R² 参考 (mean)</th>
-                        <th>CV R² 参考 (std)</th>
-                        <th>Test R²</th>
-                        <th>MAE</th>
-                        <th>RMSE</th>
+                        <th>CV R² (mean)</th>
+                        <th>fold間SD</th>
                         <th>詳細</th>
                     </tr>
                 </thead>
@@ -396,9 +459,6 @@ function renderComparisonResults(container, results, yTest, featureNames) {
                             </td>
                             <td><strong>${r.model ? formatNumber(r.cvMean) : '-'}</strong></td>
                             <td>${r.model ? formatNumber(r.cvStd) : '-'}</td>
-                            <td>${r.model ? formatNumber(r.r2) : '-'}</td>
-                            <td>${r.model ? formatNumber(r.mae) : '<span style="color:#ef4444;">エラー</span>'}</td>
-                            <td>${r.model ? formatNumber(r.rmse) : '-'}</td>
                             <td>${r.model ? `<button class="btn-detail" data-index="${i}" style="padding: 0.25rem 0.75rem; font-size: 0.85rem;">詳細</button>` : '-'}</td>
                         </tr>
                     `).join('')}
@@ -421,16 +481,13 @@ function renderComparisonResults(container, results, yTest, featureNames) {
     const dlCompBtn = comparisonDiv.querySelector('#dl-comparison-csv');
     if (dlCompBtn) {
         dlCompBtn.addEventListener('click', () => {
-            const headers = ['順位', 'モデル', 'Badge', 'CV R² 参考 (mean)', 'CV R² 参考 (std)', 'Test R²', 'MAE', 'RMSE'];
+            const headers = ['順位', 'モデル', 'Badge', 'CV R² (mean)', 'fold間SD'];
             const rows = _state.results.map((r, i) => [
                 r.model ? i + 1 : '-',
                 r.name,
                 r.badge,
                 r.model ? formatNumber(r.cvMean) : '-',
-                r.model ? formatNumber(r.cvStd) : '-',
-                r.model ? formatNumber(r.r2) : '-',
-                r.model ? formatNumber(r.mae) : '-',
-                r.model ? formatNumber(r.rmse) : '-'
+                r.model ? formatNumber(r.cvStd) : '-'
             ]);
             downloadCSV(toCSV(headers, rows), makeExportFileName(_state.fileName, '回帰_比較結果'));
         });
@@ -457,50 +514,120 @@ function createRegressionQualityReport(result = null) {
         yTrain: _state.yTrain,
         yTest: _state.yTest,
         preprocessInfo: _state.preprocessInfo,
+        splitStrategy: _state.splitStrategy,
+        splitColumn: _state.splitColumn,
+        splitGap: _state.splitGap,
         result
     });
+}
+
+function evaluateRegressionHoldout(result) {
+    if (result.holdoutEvaluated) return;
+    const yPred = result.model.predict(_state.XTest);
+    result.yPred = yPred;
+    result.mae = meanAbsoluteError(_state.yTest, yPred);
+    result.mse = meanSquaredError(_state.yTest, yPred);
+    result.rmse = rootMeanSquaredError(_state.yTest, yPred);
+    result.r2 = rSquared(_state.yTest, yPred);
+    result.baseline = computeRegressionBaseline(_state.yTrain, _state.yTest);
+    result.intervals = {
+        r2: bootstrapMetricInterval(_state.yTest, yPred, rSquared, { randomState: 42 }),
+        mae: bootstrapMetricInterval(_state.yTest, yPred, meanAbsoluteError, { randomState: 43 }),
+        rmse: bootstrapMetricInterval(_state.yTest, yPred, rootMeanSquaredError, { randomState: 44 })
+    };
+    result.holdoutEvaluated = true;
+}
+
+function renderRegressionIntervals(result) {
+    const intervals = result.intervals || {};
+    const rows = [
+        ['R²', intervals.r2],
+        ['MAE', intervals.mae],
+        ['RMSE', intervals.rmse]
+    ].filter(([, interval]) => interval);
+    if (!rows.length) {
+        return '<p style="color: var(--text-secondary); font-size: 0.85rem;">標本数が少ないため、ブートストラップ区間は計算していません。</p>';
+    }
+    return `
+        <div class="table-container" style="margin-top: 1rem;">
+            <table class="table">
+                <thead><tr><th>指標</th><th>推定値</th><th>95% percentile bootstrap区間</th></tr></thead>
+                <tbody>${rows.map(([label, interval]) => `
+                    <tr><td>${label}</td><td>${formatNumber(interval.estimate)}</td><td>${formatNumber(interval.lower)} - ${formatNumber(interval.upper)}</td></tr>
+                `).join('')}</tbody>
+            </table>
+        </div>
+        <p style="color: var(--text-secondary); font-size: 0.82rem;">同じテスト標本を再標本化した不確実性の目安です。母集団への保証やCVの信頼区間ではありません。</p>
+    `;
 }
 
 function showModelDetail(container, result, yTest, featureNames) {
     const evalSection = container.querySelector('#evaluate-section');
     evalSection.style.display = 'block';
+    const inputFeatureNames = _state.preprocessor?.inputFeatureNames || featureNames;
 
     container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 3);
 
     const evalContent = container.querySelector('#evaluation-content');
     const hasTuneGrid = PARAM_GRIDS[result.badge] != null;
+    if (_state.holdoutRevealed) evaluateRegressionHoldout(result);
+    const holdoutMetrics = _state.holdoutRevealed ? `
+        ${createMetricCard('Test R²', result.r2, '未使用テストデータの決定係数')}
+        ${createMetricCard('Test MAE', result.mae, '平均絶対誤差')}
+        ${createMetricCard('Test RMSE', result.rmse, '大きな誤差をより重く評価')}
+    ` : '';
+    const holdoutPanel = _state.holdoutRevealed ? `
+        <div class="model-config" style="margin-top: 1.5rem;">
+            <h4><i class="fas fa-lock-open"></i> 最終テスト評価 (${yTest.length}件)</h4>
+            <p style="color: var(--text-secondary); font-size: 0.9rem;">
+                ${_state.holdoutReused
+                    ? '開示後にモデル調整を行ったため、以後のテスト指標は探索的な参考値です。新しい独立データで再評価してください。'
+                    : 'モデル選択に使わず一度だけ開示した保持データです。'}
+            </p>
+            ${renderRegressionIntervals(result)}
+        </div>
+    ` : `
+        <div class="model-config" style="margin-top: 1.5rem; border-left: 4px solid #d97706;">
+            <h4><i class="fas fa-lock"></i> 最終テストは未開封です</h4>
+            <p style="color: var(--text-secondary); font-size: 0.9rem;">
+                まずCVだけでアルゴリズムとパラメータを決めてください。開示すると、このセッションでは同じテストデータを独立評価として再利用できません。
+            </p>
+            <button id="btn-reveal-holdout" class="btn-analysis" style="background: #b45309;">
+                <i class="fas fa-lock-open"></i> このモデルで最終テストを開示
+            </button>
+        </div>
+    `;
 
     evalContent.innerHTML = `
         <h3><i class="fas fa-chart-bar" style="color: #d97706;"></i> ${result.name} の詳細評価</h3>
 
         <div class="metrics-grid" style="margin: 1.5rem 0;">
-            ${createMetricCard('CV R² 参考', result.cvMean, `${_state.cvFolds}-Fold 前処理込みCV平均`)}
-            ${createMetricCard('CV R² 参考 std', result.cvStd, '前処理込みCVの標準偏差')}
-            ${createMetricCard('Test R²', result.r2, 'テストデータ決定係数')}
-            ${result.adjR2 == null ? '' : createMetricCard('Adjusted R²', result.adjR2, '特徴量数を考慮したR²')}
-            ${createMetricCard('MAE', result.mae, '平均絶対誤差')}
-            ${createMetricCard('RMSE', result.rmse, '二乗平均平方根誤差')}
+            ${createMetricCard('CV R²', result.cvMean, `${_state.cvFolds}-Fold 前処理込みCV平均`)}
+            ${createMetricCard('fold間SD', result.cvStd, 'foldスコアの標準偏差（信頼区間ではない）')}
+            ${holdoutMetrics}
         </div>
 
-        ${renderRegressionPerformanceDiagnostics(result, yTest)}
+        ${holdoutPanel}
+
+        ${_state.holdoutRevealed ? renderRegressionPerformanceDiagnostics(result, yTest) : ''}
 
         ${renderAnalysisQualityPanel(createRegressionQualityReport(result), { title: '評価信頼性チェック', maxItems: 10 })}
 
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 2rem;">
+        ${_state.holdoutRevealed ? `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 2rem;">
             <div><div id="actual-vs-pred-plot"></div></div>
             <div><div id="residual-plot"></div></div>
-        </div>
+        </div>` : ''}
 
         ${result.featureImportance ? '<div id="feature-importance-plot" style="margin-top: 2rem;"></div>' : ''}
 
         ${renderRegressionModelDiagnostics(result, featureNames)}
 
-        <div style="margin-top: 2rem;">
+        ${_state.holdoutRevealed ? `<div style="margin-top: 2rem;">
             <h4>結果の解釈</h4>
             <div style="background: #f8fafc; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #d97706; line-height: 1.8;">
                 ${interpretResults(result)}
             </div>
-        </div>
+        </div>` : ''}
 
         <!-- Create Model Section -->
         <div style="margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, #ecfdf5, #d1fae5); border-radius: 12px;">
@@ -550,7 +677,7 @@ function showModelDetail(container, result, yTest, featureNames) {
             <p style="color: #166534; margin: 0.5rem 0;">
                 Permutation Feature Importance、PDP、Learning Curve、SHAP でモデルを深く理解します。
             </p>
-            <button id="btn-interpret" class="btn-analysis" style="background: #16a34a; margin-top: 1rem;">
+            <button id="btn-interpret" class="btn-analysis" style="background: #16a34a; margin-top: 1rem;" ${_state.holdoutRevealed ? '' : 'disabled title="最終テスト開示後に利用できます"'}>
                 <i class="fas fa-microscope"></i> interpret_model を実行
             </button>
             <div id="interpret-results" style="margin-top: 1rem;"></div>
@@ -570,7 +697,7 @@ function showModelDetail(container, result, yTest, featureNames) {
                     <option value="7">全モデル (7)</option>
                 </select>
             </div>
-            <button id="btn-blend" class="btn-analysis" style="background: #7c3aed; margin-top: 0.5rem;">
+            <button id="btn-blend" class="btn-analysis" style="background: #7c3aed; margin-top: 0.5rem;" ${_state.holdoutRevealed ? '' : 'disabled title="現在の実装では最終テスト開示後の探索機能です"'}>
                 <i class="fas fa-blender"></i> blend_models を実行
             </button>
             <div id="blend-results" style="margin-top: 1rem;"></div>
@@ -590,7 +717,7 @@ function showModelDetail(container, result, yTest, featureNames) {
                     <option value="7">全モデル (7)</option>
                 </select>
             </div>
-            <button id="btn-stack" class="btn-analysis" style="background: #a855f7; margin-top: 0.5rem;">
+            <button id="btn-stack" class="btn-analysis" style="background: #a855f7; margin-top: 0.5rem;" ${_state.holdoutRevealed && _state.splitStrategy === 'random' ? '' : `disabled title="${_state.splitStrategy === 'random' ? '現在の実装では最終テスト開示後の探索機能です' : 'グループ・時系列分割ではOOF構築未対応のため利用できません'}"`}>
                 <i class="fas fa-cubes"></i> stack_models を実行
             </button>
             <div id="stack-results" style="margin-top: 1rem;"></div>
@@ -602,7 +729,7 @@ function showModelDetail(container, result, yTest, featureNames) {
             <p style="color: #991b1b; margin: 0.5rem 0;">
                 全データ（訓練+テスト）で再学習し、本番用モデルとして確定します。
             </p>
-            <button id="btn-finalize" class="btn-analysis" style="background: #dc2626; margin-top: 1rem;">
+            <button id="btn-finalize" class="btn-analysis" style="background: #dc2626; margin-top: 1rem;" ${_state.holdoutRevealed ? '' : 'disabled title="最終テスト評価後に確定してください"'}>
                 <i class="fas fa-flag-checkered"></i> finalize_model を実行
             </button>
             <div id="finalize-results" style="margin-top: 1rem;"></div>
@@ -615,7 +742,7 @@ function showModelDetail(container, result, yTest, featureNames) {
                 各特徴量の値を入力して予測を実行します。
             </p>
             <div id="predict-inputs" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; margin: 1rem 0;">
-                ${featureNames.map((f, i) => renderPredictInput(f, i)).join('')}
+                ${inputFeatureNames.map((f, i) => renderPredictInput(f, i)).join('')}
             </div>
             <button id="btn-predict" class="btn-analysis" style="background: #2563eb; margin-top: 0.5rem;">
                 <i class="fas fa-play"></i> predict_model を実行
@@ -624,11 +751,22 @@ function showModelDetail(container, result, yTest, featureNames) {
         </div>
     `;
 
-    renderActualVsPredicted('actual-vs-pred-plot', yTest, result.yPred);
-    renderResidualPlot('residual-plot', yTest, result.yPred);
+    if (_state.holdoutRevealed) {
+        renderActualVsPredicted('actual-vs-pred-plot', yTest, result.yPred);
+        renderResidualPlot('residual-plot', yTest, result.yPred);
+    }
 
     if (result.featureImportance && featureNames) {
         renderFeatureImportance('feature-importance-plot', featureNames, result.featureImportance);
+    }
+
+    const revealButton = container.querySelector('#btn-reveal-holdout');
+    if (revealButton) {
+        revealButton.addEventListener('click', () => {
+            _state.holdoutRevealed = true;
+            evaluateRegressionHoldout(result);
+            showModelDetail(container, result, yTest, featureNames);
+        });
     }
 
     // Create model - initialize param inputs and handlers
@@ -669,7 +807,7 @@ function showModelDetail(container, result, yTest, featureNames) {
 
     // Predict button handler
     container.querySelector('#btn-predict').addEventListener('click', () => {
-        runPredictModel(container, result, featureNames);
+        runPredictModel(container, result, inputFeatureNames);
     });
 
     renderAIAssistPanel({
@@ -687,10 +825,13 @@ function showModelDetail(container, result, yTest, featureNames) {
                 features: featureNames,
                 cvR2Mean: result.cvMean,
                 cvR2Std: result.cvStd,
-                testR2: result.r2,
-                adjustedR2: result.adjR2,
-                mae: result.mae,
-                rmse: result.rmse
+                holdoutStatus: _state.holdoutRevealed ? '開示済み' : '未開封',
+                ...(_state.holdoutRevealed ? {
+                    testR2: result.r2,
+                    trainingAdjustedR2: result.trainAdjustedR2,
+                    mae: result.mae,
+                    rmse: result.rmse
+                } : {})
             },
             notes: getAnalysisQualityNotes(createRegressionQualityReport(result))
         })
@@ -723,17 +864,15 @@ async function runTuneModel(container, result, featureNames) {
                 cv: _state.cvFolds,
                 scoring: 'r2',
                 task: 'regression',
-                selectedFeatures: _state.selectedFeatures
+                selectedFeatures: _state.selectedFeatures,
+                ...getSplitOptions()
             }
         );
 
-        // Train best model on full training data and evaluate on test
+        // Train the CV-selected model on the full training partition. The
+        // holdout remains outside parameter selection.
         const tunedModel = new result.cls(bestParams);
         tunedModel.fit(_state.XTrain, _state.yTrain);
-        const yPredTuned = tunedModel.predict(_state.XTest);
-        const tunedR2 = rSquared(_state.yTest, yPredTuned);
-        const tunedMAE = meanAbsoluteError(_state.yTest, yPredTuned);
-        const tunedRMSE = rootMeanSquaredError(_state.yTest, yPredTuned);
 
         const improved = bestScore > result.cvMean;
 
@@ -756,30 +895,6 @@ async function runTuneModel(container, result, featureNames) {
                                 <td>${formatNumber(bestScore)}</td>
                                 <td style="color: ${bestScore > result.cvMean ? '#10b981' : '#ef4444'};">
                                     ${bestScore > result.cvMean ? '+' : ''}${formatNumber(bestScore - result.cvMean)}
-                                </td>
-                            </tr>
-                            <tr>
-                                <td>Test R²</td>
-                                <td>${formatNumber(result.r2)}</td>
-                                <td>${formatNumber(tunedR2)}</td>
-                                <td style="color: ${tunedR2 > result.r2 ? '#10b981' : '#ef4444'};">
-                                    ${tunedR2 > result.r2 ? '+' : ''}${formatNumber(tunedR2 - result.r2)}
-                                </td>
-                            </tr>
-                            <tr>
-                                <td>Test MAE</td>
-                                <td>${formatNumber(result.mae)}</td>
-                                <td>${formatNumber(tunedMAE)}</td>
-                                <td style="color: ${tunedMAE < result.mae ? '#10b981' : '#ef4444'};">
-                                    ${formatNumber(tunedMAE - result.mae)}
-                                </td>
-                            </tr>
-                            <tr>
-                                <td>Test RMSE</td>
-                                <td>${formatNumber(result.rmse)}</td>
-                                <td>${formatNumber(tunedRMSE)}</td>
-                                <td style="color: ${tunedRMSE < result.rmse ? '#10b981' : '#ef4444'};">
-                                    ${formatNumber(tunedRMSE - result.rmse)}
                                 </td>
                             </tr>
                         </tbody>
@@ -820,16 +935,25 @@ async function runTuneModel(container, result, featureNames) {
         // Update the model in result if improved
         if (improved) {
             result.model = tunedModel;
-            result.yPred = yPredTuned;
-            result.r2 = tunedR2;
-            result.mae = tunedMAE;
-            result.rmse = tunedRMSE;
             result.cvMean = bestScore;
             result.featureImportance = tunedModel.getFeatureImportance ? tunedModel.getFeatureImportance() : null;
+            result.holdoutEvaluated = false;
+            result.yPred = null;
+            result.r2 = null;
+            result.mae = null;
+            result.rmse = null;
+            result.trainAdjustedR2 = result.badge === 'Linear'
+                ? safeAdjustedRSquared(_state.yTrain, tunedModel.predict(_state.XTrain), _state.featureNames.length)
+                : null;
+            result.intervals = null;
+            if (_state.holdoutRevealed) {
+                _state.holdoutReused = true;
+                evaluateRegressionHoldout(result);
+            }
         }
 
     } catch (error) {
-        tuneResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> チューニングエラー: ${error.message}</p>`;
+        tuneResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> チューニングエラー: ${_escapeHtml(error.message)}</p>`;
         console.error('Tune error:', error);
     }
 
@@ -890,7 +1014,6 @@ async function runCreateModel(container, featureNames) {
         // Train the model
         const model = new modelDef.cls(params);
         model.fit(_state.XTrain, _state.yTrain);
-        const yPred = model.predict(_state.XTest);
 
         // Cross-validation with preprocessing fitted inside each fold.
         const cvScores = crossValidateWithPreprocessing(modelDef.cls, _state.trainRows, _state.targetCol, {
@@ -898,14 +1021,11 @@ async function runCreateModel(container, featureNames) {
             cv: _state.cvFolds,
             scoring: 'r2',
             task: 'regression',
-            selectedFeatures: _state.selectedFeatures
+            selectedFeatures: _state.selectedFeatures,
+            ...getSplitOptions()
         });
         const cvMean = cvScores.reduce((a, b) => a + b, 0) / cvScores.length;
         const cvStd = Math.sqrt(cvScores.reduce((a, v) => a + (v - cvMean) ** 2, 0) / cvScores.length);
-
-        const r2 = rSquared(_state.yTest, yPred);
-        const mae = meanAbsoluteError(_state.yTest, yPred);
-        const rmse = rootMeanSquaredError(_state.yTest, yPred);
 
         // Store in state
         _state.createdModel = model;
@@ -913,10 +1033,9 @@ async function runCreateModel(container, featureNames) {
             name: modelDef.name,
             badge: modelDef.badge,
             cls: modelDef.cls,
-            model, r2, mae, rmse, cvMean, cvStd, yPred, params
+            model, cvMean, cvStd, params, holdoutEvaluated: false
         };
 
-        const plotId = 'create-model-avp-plot';
         createResults.innerHTML = `
             <div style="background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1rem;">
                 <h4><i class="fas fa-check-circle" style="color: #059669;"></i> ${modelDef.name} を作成しました</h4>
@@ -925,9 +1044,6 @@ async function runCreateModel(container, featureNames) {
                 </p>
                 <div class="metrics-grid" style="margin: 1rem 0;">
                     ${createMetricCard('CV R² 参考', cvMean, `${_state.cvFolds}-Fold 前処理込みCV平均`)}
-                    ${createMetricCard('Test R²', r2, 'テストデータ決定係数')}
-                    ${createMetricCard('MAE', mae, '平均絶対誤差')}
-                    ${createMetricCard('RMSE', rmse, '二乗平均平方根誤差')}
                 </div>
 
                 ${_state.results && _state.results[0] ? `
@@ -938,27 +1054,11 @@ async function runCreateModel(container, featureNames) {
                         </thead>
                         <tbody>
                             <tr>
-                                <td>Test R²</td>
-                                <td>${formatNumber(_state.results[0].r2)}</td>
-                                <td>${formatNumber(r2)}</td>
-                                <td style="color: ${r2 > _state.results[0].r2 ? '#10b981' : '#ef4444'};">
-                                    ${r2 > _state.results[0].r2 ? '+' : ''}${formatNumber(r2 - _state.results[0].r2)}
-                                </td>
-                            </tr>
-                            <tr>
-                                <td>MAE</td>
-                                <td>${formatNumber(_state.results[0].mae)}</td>
-                                <td>${formatNumber(mae)}</td>
-                                <td style="color: ${mae < _state.results[0].mae ? '#10b981' : '#ef4444'};">
-                                    ${formatNumber(mae - _state.results[0].mae)}
-                                </td>
-                            </tr>
-                            <tr>
-                                <td>RMSE</td>
-                                <td>${formatNumber(_state.results[0].rmse)}</td>
-                                <td>${formatNumber(rmse)}</td>
-                                <td style="color: ${rmse < _state.results[0].rmse ? '#10b981' : '#ef4444'};">
-                                    ${formatNumber(rmse - _state.results[0].rmse)}
+                                <td>CV R²</td>
+                                <td>${formatNumber(_state.results[0].cvMean)}</td>
+                                <td>${formatNumber(cvMean)}</td>
+                                <td style="color: ${cvMean > _state.results[0].cvMean ? '#10b981' : '#ef4444'};">
+                                    ${cvMean > _state.results[0].cvMean ? '+' : ''}${formatNumber(cvMean - _state.results[0].cvMean)}
                                 </td>
                             </tr>
                         </tbody>
@@ -969,14 +1069,12 @@ async function runCreateModel(container, featureNames) {
                 <p style="color: #059669; font-weight: 600; margin-top: 1rem;">
                     <i class="fas fa-info-circle"></i> 作成したモデルは predict_model で使用できます。
                 </p>
-                <div id="${plotId}" style="margin-top: 1.5rem;"></div>
             </div>
         `;
-
-        renderActualVsPredicted(plotId, _state.yTest, yPred);
+        if (_state.holdoutRevealed) _state.holdoutReused = true;
 
     } catch (error) {
-        createResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> モデル作成エラー: ${error.message}</p>`;
+        createResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> モデル作成エラー: ${_escapeHtml(error.message)}</p>`;
         console.error('Create model error:', error);
     }
 
@@ -1011,7 +1109,7 @@ async function runInterpretModel(container, result, featureNames) {
         html += '<p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 0.5rem;">各特徴量が予測値にどう影響するかを可視化します。</p>';
         html += '<div style="margin-bottom: 1rem;"><label style="font-weight: 600; margin-right: 0.5rem;">特徴量を選択:</label>';
         html += `<select id="pdp-feature-select" class="form-select" style="display: inline-block; width: auto;">
-            ${featureNames.map((f, i) => `<option value="${i}" data-i18n-ignore>${f}</option>`).join('')}
+            ${featureNames.map((f, i) => `<option value="${i}" data-i18n-ignore>${_escapeHtml(f)}</option>`).join('')}
         </select></div>`;
         html += '<div id="pdp-plot"></div>';
 
@@ -1022,6 +1120,7 @@ async function runInterpretModel(container, result, featureNames) {
 
         // 4. SHAP Values
         html += '<h4 style="margin-top: 2rem;"><i class="fas fa-chart-pie" style="color: #16a34a;"></i> SHAP (SHapley Additive exPlanations)</h4>';
+        html += '<p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.75rem;">非線形モデルでは、訓練データを背景に固定seedの順列近似で局所的な寄与を計算します。予測値との加法整合性を保ちますが、相関した特徴量間の配分は背景データに依存します。</p>';
         html += '<p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">ゲーム理論に基づく特徴量の貢献度。各特徴量が個々の予測にどの程度影響しているかを定量化します。</p>';
         html += '<div id="shap-summary-plot"></div>';
         html += '<div id="shap-beeswarm-plot" style="margin-top: 1.5rem;"></div>';
@@ -1049,10 +1148,16 @@ async function runInterpretModel(container, result, featureNames) {
         });
 
         // Compute learning curve
-        const lcResult = learningCurve(
+        const lcResult = learningCurveWithPreprocessing(
             result.cls, result.model.getParams ? result.model.getParams() : {},
-            _state.XTrain, _state.yTrain,
-            { cv: Math.min(_state.cvFolds, 3), scoring: 'r2' }
+            _state.trainRows, _state.targetCol,
+            {
+                cv: Math.min(_state.cvFolds, 3),
+                scoring: 'r2',
+                task: 'regression',
+                selectedFeatures: _state.selectedFeatures,
+                ...getSplitOptions()
+            }
         );
         renderLearningCurve(
             'learning-curve-plot',
@@ -1110,7 +1215,7 @@ async function runInterpretModel(container, result, featureNames) {
             const shapContainer = container.querySelector('#shap-summary-plot');
             if (shapContainer) {
                 shapContainer.innerHTML = `<p style="color: #f59e0b; font-size: 0.9rem;">
-                    <i class="fas fa-exclamation-triangle"></i> SHAP値の計算に失敗しました: ${shapError.message}
+                    <i class="fas fa-exclamation-triangle"></i> SHAP値の計算に失敗しました: ${_escapeHtml(shapError.message)}
                 </p>`;
             }
         }
@@ -1120,7 +1225,7 @@ async function runInterpretModel(container, result, featureNames) {
         container.querySelector('#interpret-analysis').innerHTML = analysisHtml;
 
     } catch (error) {
-        interpretResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 解釈エラー: ${error.message}</p>`;
+        interpretResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 解釈エラー: ${_escapeHtml(error.message)}</p>`;
         console.error('Interpret error:', error);
     }
 
@@ -1183,24 +1288,10 @@ function generateInterpretAnalysis(featureNames, importancesMean, lcResult) {
 
     html += '</ul><p style="margin-top: 1rem;"><strong>学習曲線の分析:</strong></p><ul>';
 
-    if (gap > 0.15) {
-        html += `<li style="color: #ef4444;"><strong>過学習の兆候</strong>: 訓練スコア (${lastTrainScore.toFixed(3)}) と検証スコア (${lastTestScore.toFixed(3)}) の差が大きい (${gap.toFixed(3)})。正則化の強化やデータ追加を検討してください。</li>`;
-    } else if (gap > 0.05) {
-        html += `<li style="color: #f59e0b;">訓練スコアと検証スコアにやや差があります (gap=${gap.toFixed(3)})。軽度の過学習の可能性。</li>`;
-    } else {
-        html += `<li style="color: #10b981;">訓練スコアと検証スコアが近く (gap=${gap.toFixed(3)})、<strong>良好な汎化性能</strong>を示しています。</li>`;
-    }
-
-    if (lastTestScore < 0.5) {
-        html += '<li style="color: #ef4444;"><strong>未学習の兆候</strong>: 検証スコアが低いため、より複雑なモデルや特徴量エンジニアリングを検討してください。</li>';
-    }
-
     const earlyTestScore = lcResult.testScoresMean[0];
-    if (lastTestScore - earlyTestScore > 0.05) {
-        html += '<li>データ量の増加でスコアが向上しているため、<strong>追加データ収集が効果的</strong>と考えられます。</li>';
-    } else {
-        html += '<li>データ量増加による改善が小さいため、特徴量の改善やモデルの変更がより効果的です。</li>';
-    }
+    const scoreChange = lastTestScore - earlyTestScore;
+    html += `<li>最大データ量での訓練R²は ${lastTrainScore.toFixed(3)}、検証R²は ${lastTestScore.toFixed(3)}、差は ${gap.toFixed(3)} です。差だけで過学習を断定せず、各点のばらつきと業務上必要な誤差を併せて確認してください。</li>`;
+    html += `<li>最小データ量から最大データ量までの検証R²の変化は ${scoreChange >= 0 ? '+' : ''}${scoreChange.toFixed(3)} です。この範囲の曲線から、範囲外のデータ追加効果を保証することはできません。</li>`;
 
     html += '</ul></div>';
     return html;
@@ -1225,6 +1316,9 @@ async function runBlendModels(container, featureNames) {
         const topN = parseInt(container.querySelector('#blend-top-n').value);
         const validResults = _state.results.filter(r => r.model);
         const topModels = validResults.slice(0, topN);
+        if (!_state.holdoutRevealed) throw new Error('先に最終テストを開示してください。');
+        topModels.forEach(evaluateRegressionHoldout);
+        _state.holdoutReused = true;
 
         // Blend predictions (average)
         const blendedPred = _state.yTest.map((_, i) => {
@@ -1259,6 +1353,7 @@ async function runBlendModels(container, featureNames) {
                 <p style="color: var(--text-secondary); margin-bottom: 1rem;">
                     使用モデル: ${topModels.map(m => m.badge).join(', ')}
                 </p>
+                <p style="color: #b45309; font-size: 0.9rem;">開示済みテストデータでアンサンブルを比較しているため、この結果は探索的な参考値です。</p>
                 <div class="table-container">
                     <table class="table">
                         <thead>
@@ -1309,7 +1404,7 @@ async function runBlendModels(container, featureNames) {
         renderActualVsPredicted(plotId, _state.yTest, blendedPred);
 
     } catch (error) {
-        blendResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> ブレンドエラー: ${error.message}</p>`;
+        blendResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> ブレンドエラー: ${_escapeHtml(error.message)}</p>`;
         console.error('Blend error:', error);
     }
 
@@ -1317,6 +1412,7 @@ async function runBlendModels(container, featureNames) {
 }
 
 async function runStackModels(container, featureNames) {
+    if (_state.splitStrategy !== 'random') return;
     const stackResults = container.querySelector('#stack-results');
     const btnStack = container.querySelector('#btn-stack');
     btnStack.disabled = true;
@@ -1335,6 +1431,9 @@ async function runStackModels(container, featureNames) {
         const topN = parseInt(container.querySelector('#stack-top-n').value);
         const validResults = _state.results.filter(r => r.model);
         const baseModels = validResults.slice(0, topN);
+        if (!_state.holdoutRevealed) throw new Error('先に最終テストを開示してください。');
+        baseModels.forEach(evaluateRegressionHoldout);
+        _state.holdoutReused = true;
 
         // Generate out-of-fold meta-features to avoid training the meta model on
         // in-sample base predictions.
@@ -1411,6 +1510,7 @@ async function runStackModels(container, featureNames) {
                 <p style="color: var(--text-secondary); margin-bottom: 1rem;">
                     ベースモデル: ${baseModels.map(m => m.badge).join(', ')} → foldごとに前処理をfitしたOut-of-Fold予測でメタモデルを学習
                 </p>
+                <p style="color: #b45309; font-size: 0.9rem;">開示済みテストデータで構成を比較しているため、この結果は探索的な参考値です。</p>
 
                 ${metaCoeffs.length > 0 ? `
                 <div style="margin-bottom: 1rem;">
@@ -1485,7 +1585,7 @@ async function runStackModels(container, featureNames) {
         renderActualVsPredicted(plotId, _state.yTest, stackedPred);
 
     } catch (error) {
-        stackResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> スタッキングエラー: ${error.message}</p>`;
+        stackResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> スタッキングエラー: ${_escapeHtml(error.message)}</p>`;
         console.error('Stack error:', error);
     }
 
@@ -1512,7 +1612,8 @@ async function runFinalizeModel(container, result, featureNames) {
             selectedFeatures: _state.selectedFeatures,
             task: 'regression',
             testSize: 0,
-            randomState: 42
+            randomState: 42,
+            ...getSplitOptions()
         });
         const XFull = fullPrepared.XTrain;
         const yFull = fullPrepared.yTrain;
@@ -1530,17 +1631,6 @@ async function runFinalizeModel(container, result, featureNames) {
         _state.finalizedPreprocessInfo = fullPrepared.preprocessInfo;
         _state.isFinalized = true;
 
-        // CV score on full data for reference
-        const cvScores = crossValidateWithPreprocessing(result.cls, _state.rawData, _state.targetCol, {
-            params,
-            cv: _state.cvFolds,
-            scoring: 'r2',
-            task: 'regression',
-            selectedFeatures: _state.selectedFeatures
-        });
-        const cvMean = cvScores.reduce((a, b) => a + b, 0) / cvScores.length;
-        const cvStd = Math.sqrt(cvScores.reduce((a, v) => a + (v - cvMean) ** 2, 0) / cvScores.length);
-
         finalizeResults.innerHTML = `
             <div style="background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1rem;">
                 <h4><i class="fas fa-check-circle" style="color: #10b981;"></i> モデル確定完了</h4>
@@ -1549,14 +1639,12 @@ async function runFinalizeModel(container, result, featureNames) {
                 </p>
                 <div class="metrics-grid" style="margin: 1rem 0;">
                     ${createMetricCard('学習サンプル数', XFull.length, '訓練+テストの全データ')}
-                    ${createMetricCard('CV R² 参考', cvMean, `${_state.cvFolds}-Fold 全データ前処理込みCV参考`)}
-                    ${createMetricCard('CV R² 参考 std', cvStd, '全データ前処理込みCV参考の標準偏差')}
                 </div>
                 <div style="background: #f0fdf4; padding: 1rem; border-radius: 8px; border-left: 4px solid #10b981;">
                     <p style="color: #166534;">
                         <i class="fas fa-info-circle"></i>
                         これは本番用モデルです。前処理も全データでfitし直しており、predict_model では確定済みモデルと同じ前処理で予測を行います。
-                        テストデータがなくなるため、独立したテスト評価は行えません。CVスコアは参考値として扱ってください。
+                        この確定モデルは全データを学習に使ったため、独立した性能指標は表示しません。確定前に開示したテスト評価は、訓練データだけでfitした直前モデルの評価です。
                     </p>
                 </div>
                 ${createDownloadButton('dl-model-json', 'モデルをJSONダウンロード')}
@@ -1571,6 +1659,8 @@ async function runFinalizeModel(container, result, featureNames) {
                     { model: finalModel, name: result.name, badge: result.badge },
                     {
                         featureNames: _state.finalizedFeatureNames || _state.featureNames,
+                        inputFeatureNames: (_state.finalizedPreprocessor || _state.preprocessor)?.inputFeatureNames,
+                        pipelineSpec: (_state.finalizedPreprocessor || _state.preprocessor)?.pipelineSpec,
                         scaler: _state.finalizedScaler || _state.scaler,
                         encoders: _state.finalizedEncoders || _state.encoders,
                         targetCol: _state.targetCol,
@@ -1583,7 +1673,7 @@ async function runFinalizeModel(container, result, featureNames) {
         }
 
     } catch (error) {
-        finalizeResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 確定エラー: ${error.message}</p>`;
+        finalizeResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 確定エラー: ${_escapeHtml(error.message)}</p>`;
         console.error('Finalize error:', error);
     }
 
@@ -1678,12 +1768,15 @@ function runPredictModel(container, result, featureNames) {
 
         predictResult.innerHTML = `
             <div style="background: white; padding: 1.5rem; border-radius: 8px; text-align: center;">
-                <p style="font-size: 0.9rem; color: var(--text-secondary);">予測結果 (${modelLabel})</p>
+                <p style="font-size: 0.9rem; color: var(--text-secondary);">予測結果 (${_escapeHtml(modelLabel)})</p>
                 <p style="font-size: 2.5rem; font-weight: 700; color: #2563eb; margin: 0.5rem 0;">
                     ${formatNumber(prediction[0], 4)}
                 </p>
                 <p style="font-size: 0.85rem; color: var(--text-secondary);">
-                    目的変数: ${_state.targetCol}
+                    目的変数: ${_escapeHtml(_state.targetCol)}
+                </p>
+                <p style="font-size: 0.82rem; color: #92400e; margin-top: 0.75rem;">
+                    この値は点予測です。個別の将来観測に対する予測区間ではありません。
                 </p>
                 ${createDownloadButton('dl-predict-csv', '予測結果をCSVダウンロード')}
             </div>
@@ -1699,7 +1792,7 @@ function runPredictModel(container, result, featureNames) {
             });
         }
     } catch (error) {
-        predictResult.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 予測エラー: ${error.message}</p>`;
+        predictResult.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 予測エラー: ${_escapeHtml(error.message)}</p>`;
         console.error('Predict error:', error);
     }
 }
@@ -1743,6 +1836,7 @@ function renderRegressionPerformanceDiagnostics(result, yTest) {
             <h4><i class="fas fa-gauge-high"></i> 性能の妥当性チェック</h4>
             <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">
                 Test指標を主に見ます。CVはfoldごとの訓練データだけで前処理をfitする参考値ですが、最終判断では独立テスト指標も確認します。
+                R²だけで適合の妥当性は判断できないため、実測対予測と残差プロットも確認してください。
             </p>
             <div class="table-container">
                 <table class="table">
@@ -1814,11 +1908,14 @@ function renderRegressionModelDiagnostics(result, featureNames) {
                 <h4><i class="fas fa-list-ol"></i> モデル固有の見方: 係数</h4>
                 <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">
                     ${regularization}。係数は前処理後、主に標準化後特徴量に対する値です。数値特徴量では符号が方向、絶対値が影響の大きさの目安です。
-                    Label Encodingされたカテゴリ特徴量の係数はカテゴリ順序を意味しないため、符号や大小を強く解釈しないでください。
+                    カテゴリ特徴量は「列名=カテゴリ」のOne-Hot列として表示されます。基準・相関・正則化によって係数が変わるため、単独で因果効果とは解釈しないでください。
                 </p>
                 <div class="metrics-grid" style="margin: 1rem 0;">
                     ${createMetricCard('切片', model.intercept, '前処理後スケールでの切片')}
                     ${createMetricCard('非ゼロ係数', nonZero, badge === 'Lasso' ? 'Lassoの変数選択の目安' : '0でない係数数')}
+                    ${badge === 'Linear' && result.trainAdjustedR2 != null
+                        ? createMetricCard('訓練Adjusted R²', result.trainAdjustedR2, 'OLSの訓練内適合度。独立テスト性能ではない')
+                        : ''}
                 </div>
                 ${renderCoefficientTable(rows)}
             </div>
@@ -1870,7 +1967,7 @@ function renderCoefficientTable(rows) {
                 <tbody>
                     ${rows.map(row => `
                         <tr>
-                            <td><strong data-i18n-ignore>${row.name}</strong></td>
+                            <td><strong data-i18n-ignore>${_escapeHtml(row.name)}</strong></td>
                             <td>${formatNumber(row.coef)}</td>
                             <td>${formatNumber(row.abs)}</td>
                             <td>${row.coef > 0 ? '増えると予測値が上がる傾向' : row.coef < 0 ? '増えると予測値が下がる傾向' : 'ほぼ影響なし'}</td>
@@ -1896,7 +1993,7 @@ function renderImportanceTable(featureNames, importances) {
                 <tbody>
                     ${rows.map(row => `
                         <tr>
-                            <td><strong data-i18n-ignore>${row.name}</strong></td>
+                            <td><strong data-i18n-ignore>${_escapeHtml(row.name)}</strong></td>
                             <td>${formatNumber(row.importance)}</td>
                             <td>大きいほど分岐や予測に使われた度合いが高い</td>
                         </tr>
@@ -1914,7 +2011,7 @@ function renderParameterTable(params) {
             <table class="table">
                 <thead><tr><th>項目</th><th>値</th></tr></thead>
                 <tbody>
-                    ${params.map(([label, value]) => `<tr><td>${label}</td><td>${value}</td></tr>`).join('')}
+                    ${params.map(([label, value]) => `<tr><td>${_escapeHtml(label)}</td><td>${_escapeHtml(value)}</td></tr>`).join('')}
                 </tbody>
             </table>
         </div>
@@ -1932,31 +2029,16 @@ function formatPercent(value) {
 }
 
 function interpretResults(result) {
-    const r2 = result.r2;
-    let interpretation = `<p><strong>${result.name}</strong> の評価結果:</p><ul>`;
-
-    if (r2 >= 0.9) {
-        interpretation += `<li>R² = ${formatNumber(r2)} : <strong style="color: #10b981;">非常に高い予測精度</strong>です。モデルがデータの${(r2 * 100).toFixed(1)}%の分散を説明しています。</li>`;
-    } else if (r2 >= 0.7) {
-        interpretation += `<li>R² = ${formatNumber(r2)} : <strong style="color: #3b82f6;">良好な予測精度</strong>です。実用的に十分な精度と言えます。</li>`;
-    } else if (r2 >= 0.5) {
-        interpretation += `<li>R² = ${formatNumber(r2)} : <strong style="color: #f59e0b;">中程度の予測精度</strong>です。特徴量の追加や前処理の改善を検討してください。</li>`;
-    } else {
-        interpretation += `<li>R² = ${formatNumber(r2)} : <strong style="color: #ef4444;">予測精度が低い</strong>です。データの品質や特徴量の選択を見直してください。</li>`;
-    }
-
-    // CV interpretation
-    interpretation += `<li>CV R² = ${formatNumber(result.cvMean)} ± ${formatNumber(result.cvStd)} : `;
-    if (Math.abs(result.cvMean - result.r2) < 0.1) {
-        interpretation += `交差検証とテストの差が小さく、<strong style="color: #10b981;">安定したモデル</strong>です。</li>`;
-    } else if (result.cvMean > result.r2) {
-        interpretation += `CVがテストR²より高く、<strong style="color: #f59e0b;">テストデータにやや弱い</strong>可能性があります。</li>`;
-    } else {
-        interpretation += `CVよりテストR²が高い結果です。</li>`;
-    }
-
-    interpretation += `<li>MAE = ${formatNumber(result.mae)} : 予測値と実測値の平均的なずれは ${formatNumber(result.mae)} です。</li>`;
-    interpretation += `<li>RMSE = ${formatNumber(result.rmse)} : 大きな誤差をより重く評価した指標で ${formatNumber(result.rmse)} です。</li>`;
+    let interpretation = `<p><strong>${_escapeHtml(result.name)}</strong> の評価結果:</p><ul>`;
+    interpretation += `<li>Test R² = ${formatNumber(result.r2)} です。0は訓練データ平均による予測と同程度、負値はそれを下回ることを表します。十分かどうかは対象分野とベースラインで判断してください。</li>`;
+    interpretation += `<li>CV R² = ${formatNumber(result.cvMean)}、fold間SD = ${formatNumber(result.cvStd)} です。SDは信頼区間ではなく、分割による変動の目安です。</li>`;
+    interpretation += `<li>MAE = ${formatNumber(result.mae)}、RMSE = ${formatNumber(result.rmse)} です。どちらも目的変数と同じ単位で、RMSEは大きな誤差の影響を強く受けます。</li>`;
+    interpretation += _state.splitStrategy === 'group'
+        ? `<li>グループ列「${_escapeHtml(_state.splitColumn)}」が分割をまたがない評価です。同じグループ内の将来観測ではなく、未知グループへの一般化を表します。</li>`
+        : _state.splitStrategy === 'time'
+            ? `<li>時刻列「${_escapeHtml(_state.splitColumn)}」で過去から未来へ分割し、gapを${_state.splitGap || 0}行設けています。時間とともに分布が変わる可能性も確認してください。</li>`
+            : '<li>無作為分割は、行が独立同分布で将来データも同じ分布に従うという前提を置きます。同一対象の反復測定や時系列ではセットアップで専用分割を選んでください。</li>';
+    interpretation += '<li>予測性能や特徴量重要度は因果効果を示しません。介入や因果関係の結論には別の研究設計が必要です。</li>';
     interpretation += `</ul>`;
 
     return interpretation;

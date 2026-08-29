@@ -18,7 +18,7 @@
  * @returns {number}
  */
 function _mean(arr) {
-  const valid = arr.filter((v) => v != null && !Number.isNaN(v));
+  const valid = arr.filter(Number.isFinite);
   if (valid.length === 0) return 0;
   return valid.reduce((s, v) => s + v, 0) / valid.length;
 }
@@ -31,7 +31,7 @@ function _mean(arr) {
  * @returns {number}
  */
 function _std(arr, mu) {
-  const valid = arr.filter((v) => v != null && !Number.isNaN(v));
+  const valid = arr.filter(Number.isFinite);
   if (valid.length <= 1) return 0;
   const m = mu !== undefined ? mu : _mean(valid);
   const variance = valid.reduce((s, v) => s + (v - m) ** 2, 0) / (valid.length - 1);
@@ -45,7 +45,7 @@ function _std(arr, mu) {
  */
 function _median(arr) {
   const sorted = arr
-    .filter((v) => v != null && !Number.isNaN(v))
+    .filter(Number.isFinite)
     .slice()
     .sort((a, b) => a - b);
   if (sorted.length === 0) return 0;
@@ -62,7 +62,7 @@ function _median(arr) {
  * @returns {number}
  */
 function _mode(arr) {
-  const valid = arr.filter((v) => v != null && !Number.isNaN(v));
+  const valid = arr.filter(Number.isFinite);
   if (valid.length === 0) return 0;
   const freq = new Map();
   for (const v of valid) {
@@ -132,7 +132,15 @@ function _pearsonCorrelation(a, b) {
  * @returns {boolean}
  */
 function _isMissing(v) {
-  return v == null || Number.isNaN(v) || (typeof v === 'string' && v.trim() === '');
+  if (v == null) return true;
+  if (typeof v === 'number') return !Number.isFinite(v);
+  if (typeof v !== 'string') return false;
+  const normalized = v.trim();
+  return normalized === '' || /^(?:nan|[+-]?infinity)$/i.test(normalized);
+}
+
+function _isFiniteNumeric(v) {
+  return !_isMissing(v) && Number.isFinite(Number(v));
 }
 
 /**
@@ -198,9 +206,61 @@ function _normalizeRawRows(rawData) {
  * @param {Object} options
  * @returns {{ trainRows: Object[], testRows: Object[] }}
  */
-function _splitRows(rows, targetCol, { testSize, randomState, stratify }) {
+function _splitRows(rows, targetCol, {
+  testSize,
+  randomState,
+  stratify,
+  splitStrategy = 'random',
+  splitColumn = null,
+  splitGap = 0,
+}) {
   const rng = _createRng(randomState);
   const select = (indices) => indices.map(i => rows[i]);
+
+  if (!['random', 'group', 'time'].includes(splitStrategy)) {
+    throw new Error(`prepareTrainTestFeatures: unknown split strategy "${splitStrategy}"`);
+  }
+
+  if (splitStrategy === 'group') {
+    if (!splitColumn) throw new Error('グループ分割にはグループ列を指定してください。');
+    const groups = new Map();
+    rows.forEach((row, index) => {
+      const value = row[splitColumn];
+      if (_isMissing(value)) throw new Error(`グループ列「${splitColumn}」に欠損があります。`);
+      if (!groups.has(value)) groups.set(value, []);
+      groups.get(value).push(index);
+    });
+    if (groups.size < 2) throw new Error('グループ分割には2つ以上のグループが必要です。');
+    const orderedGroups = _shuffle([...groups.entries()], rng);
+    const targetTestRows = Math.max(1, Math.round(rows.length * testSize));
+    const testIdx = [];
+    while (orderedGroups.length > 1 && testIdx.length < targetTestRows) {
+      testIdx.push(...orderedGroups.shift()[1]);
+    }
+    const trainIdx = orderedGroups.flatMap(([, indices]) => indices);
+    _validateSplitClassCoverage(rows, targetCol, trainIdx, testIdx, stratify, 'グループ分割');
+    return { trainRows: select(trainIdx), testRows: select(testIdx), gapRows: [] };
+  }
+
+  if (splitStrategy === 'time') {
+    if (!splitColumn) throw new Error('時系列分割には時刻列を指定してください。');
+    const withOrder = rows.map((row, index) => ({ index, order: _parseOrderValue(row[splitColumn]) }));
+    if (withOrder.some(item => !Number.isFinite(item.order))) {
+      throw new Error(`時刻列「${splitColumn}」に解釈できない値または欠損があります。`);
+    }
+    withOrder.sort((a, b) => a.order - b.order || a.index - b.index);
+    const ordered = withOrder.map(item => item.index);
+    const nTest = Math.max(1, Math.round(rows.length * testSize));
+    const gap = Math.max(0, Math.floor(Number(splitGap) || 0));
+    const testStart = rows.length - nTest;
+    const trainEnd = testStart - gap;
+    if (trainEnd < 2) throw new Error('時系列分割後の訓練データが少なすぎます。テスト割合またはgapを小さくしてください。');
+    const trainIdx = ordered.slice(0, trainEnd);
+    const gapIdx = ordered.slice(trainEnd, testStart);
+    const testIdx = ordered.slice(testStart);
+    _validateSplitClassCoverage(rows, targetCol, trainIdx, testIdx, stratify, '時系列分割');
+    return { trainRows: select(trainIdx), testRows: select(testIdx), gapRows: select(gapIdx) };
+  }
 
   if (!stratify) {
     const indices = _shuffle(Array.from({ length: rows.length }, (_, i) => i), rng);
@@ -208,7 +268,7 @@ function _splitRows(rows, targetCol, { testSize, randomState, stratify }) {
     const testIdx = indices.slice(0, nTest);
     const trainIdx = indices.slice(nTest);
     if (trainIdx.length === 0) throw new Error('prepareTrainTestFeatures: training split is empty');
-    return { trainRows: select(trainIdx), testRows: select(testIdx) };
+    return { trainRows: select(trainIdx), testRows: select(testIdx), gapRows: [] };
   }
 
   const byClass = new Map();
@@ -236,7 +296,27 @@ function _splitRows(rows, targetCol, { testSize, randomState, stratify }) {
   return {
     trainRows: select(_shuffle(trainIdx, rng)),
     testRows: select(_shuffle(testIdx, rng)),
+    gapRows: [],
   };
+}
+
+function _parseOrderValue(value) {
+  if (_isFiniteNumeric(value)) return Number(value);
+  if (_isMissing(value)) return NaN;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function _validateSplitClassCoverage(rows, targetCol, trainIdx, testIdx, stratify, label) {
+  if (!stratify) return;
+  const allClasses = new Set(rows.map(row => row[targetCol]));
+  const trainClasses = new Set(trainIdx.map(index => rows[index][targetCol]));
+  const testClasses = new Set(testIdx.map(index => rows[index][targetCol]));
+  const missingTrain = [...allClasses].filter(value => !trainClasses.has(value));
+  const missingTest = [...allClasses].filter(value => !testClasses.has(value));
+  if (missingTrain.length || missingTest.length) {
+    throw new Error(`${label}では全クラスを訓練・テストの両方に確保できません。データ量または分割列を見直してください。`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -356,7 +436,7 @@ export class MinMaxScaler {
     const mins = [];
     const maxs = [];
     for (let j = 0; j < nCols; j++) {
-      const col = _column(data, j).filter((v) => v != null && !Number.isNaN(v));
+      const col = _column(data, j).filter(Number.isFinite);
       mins.push(Math.min(...col));
       maxs.push(Math.max(...col));
     }
@@ -484,13 +564,22 @@ export class LabelEncoder {
  * ohe.transform(['b','a']); // [[0,1,0],[1,0,0]]
  */
 export class OneHotEncoder {
-  constructor() {
+  /**
+   * @param {Object} [options]
+   * @param {'error'|'ignore'} [options.handleUnknown='error']
+   */
+  constructor({ handleUnknown = 'error' } = {}) {
+    if (!['error', 'ignore'].includes(handleUnknown)) {
+      throw new Error('OneHotEncoder: handleUnknown must be "error" or "ignore"');
+    }
     /** @type {Array<*>|null} */
     this._classes = null;
     /** @type {Map<*,number>|null} */
     this._classToIndex = null;
     /** @type {boolean} */
     this.isFitted = false;
+    /** @type {'error'|'ignore'} */
+    this.handleUnknown = handleUnknown;
   }
 
   /** @type {Array<*>} */
@@ -527,8 +616,11 @@ export class OneHotEncoder {
     const nClasses = this._classes.length;
     return labels.map((l) => {
       const idx = this._classToIndex.get(l);
-      if (idx === undefined) throw new Error(`OneHotEncoder.transform: unseen label "${l}"`);
       const row = new Array(nClasses).fill(0);
+      if (idx === undefined) {
+        if (this.handleUnknown === 'ignore') return row;
+        throw new Error(`OneHotEncoder.transform: unseen label "${l}"`);
+      }
       row[idx] = 1;
       return row;
     });
@@ -595,7 +687,7 @@ export class SimpleImputer {
     _validate2D(data, 'SimpleImputer.transform');
     return data.map((row) =>
       row.map((val, j) =>
-        val == null || Number.isNaN(val) ? this.fillValues[j] : val
+        !Number.isFinite(val) ? this.fillValues[j] : val
       )
     );
   }
@@ -676,7 +768,7 @@ export function encodeCategorials(data, columns) {
  *   yTrain: Array,
  *   yTest: Array,
  *   featureNames: string[],
- *   encoders: Map<number, LabelEncoder>,
+ *   encoders: Map<number, OneHotEncoder>,
  *   scaler: StandardScaler|null,
  *   labelEncoder: LabelEncoder|null,
  *   preprocessInfo: Object,
@@ -696,6 +788,9 @@ export function prepareTrainTestFeatures(rawData, targetCol, options = {}) {
     skewnessThreshold = 2.0,
     testSize = 0.3,
     randomState = 42,
+    splitStrategy = 'random',
+    splitColumn = null,
+    splitGap = 0,
   } = options;
 
   const { headers, rows: allRows } = _normalizeRawRows(rawData);
@@ -706,7 +801,7 @@ export function prepareTrainTestFeatures(rawData, targetCol, options = {}) {
   let rows = allRows.filter(row => !_isMissing(row[targetCol]));
   const targetRowsDropped = allRows.length - rows.length;
   if (task === 'regression') {
-    rows = rows.filter(row => !Number.isNaN(Number(row[targetCol])));
+    rows = rows.filter(row => _isFiniteNumeric(row[targetCol]));
   }
   if (rows.length < 3) {
     throw new Error('prepareTrainTestFeatures: 有効な目的変数を持つ行が少なすぎます。');
@@ -714,8 +809,8 @@ export function prepareTrainTestFeatures(rawData, targetCol, options = {}) {
 
   const initialFeatures = headers.filter(h => h !== targetCol);
   const requestedFeatures = selectedFeatures && selectedFeatures.length > 0
-    ? initialFeatures.filter(h => selectedFeatures.includes(h))
-    : initialFeatures;
+    ? initialFeatures.filter(h => selectedFeatures.includes(h) && h !== splitColumn)
+    : initialFeatures.filter(h => h !== splitColumn);
   if (requestedFeatures.length === 0) {
     throw new Error('prepareTrainTestFeatures: 特徴量を1つ以上選択してください。');
   }
@@ -726,14 +821,18 @@ export function prepareTrainTestFeatures(rawData, targetCol, options = {}) {
 
   let trainRows;
   let testRows;
+  let gapRows = [];
   if (testSize === 0) {
     trainRows = [...rows];
     testRows = [];
   } else {
-    ({ trainRows, testRows } = _splitRows(rows, targetCol, {
+    ({ trainRows, testRows, gapRows } = _splitRows(rows, targetCol, {
       testSize,
       randomState,
       stratify: task === 'classification',
+      splitStrategy,
+      splitColumn,
+      splitGap,
     }));
   }
 
@@ -743,6 +842,9 @@ export function prepareTrainTestFeatures(rawData, targetCol, options = {}) {
     transformedFeatures: [],
     droppedFeatures: [],
     targetRowsDropped,
+    splitStrategy,
+    splitColumn,
+    splitGapRows: gapRows.length,
   };
 
   let featureNames = [...requestedFeatures];
@@ -764,7 +866,7 @@ export function prepareTrainTestFeatures(rawData, targetCol, options = {}) {
   let yTrain;
   let yTest;
   if (task === 'classification') {
-    const targetNumeric = yRawTrain.every(v => !Number.isNaN(Number(v)));
+    const targetNumeric = yRawTrain.every(_isFiniteNumeric);
     if (targetNumeric) {
       yTrain = yRawTrain.map(Number);
       yTest = yRawTest.map(Number);
@@ -783,7 +885,7 @@ export function prepareTrainTestFeatures(rawData, targetCol, options = {}) {
   const categoricalCols = [];
   for (let j = 0; j < fittedFeatureNames.length; j++) {
     const values = trainRows.map(row => row[fittedFeatureNames[j]]).filter(v => !_isMissing(v));
-    const isNumeric = values.length > 0 && values.every(v => !Number.isNaN(Number(v)));
+    const isNumeric = values.length > 0 && values.every(_isFiniteNumeric);
     if (isNumeric) numericCols.push(j);
     else categoricalCols.push(j);
   }
@@ -874,20 +976,49 @@ export function prepareTrainTestFeatures(rawData, targetCol, options = {}) {
 
   if (categoricalCols.length > 0) {
     for (const j of categoricalCols) {
-      const encoder = new LabelEncoder();
-      encoder.fit(XTrain.map(row => row[j]));
+      const finalMode = _modeCategorical(XTrain.map(row => row[j])) ?? categoricalModes.get(j) ?? '__missing__';
+      categoricalModes.set(j, finalMode);
+      const encoder = new OneHotEncoder({ handleUnknown: 'ignore' });
+      encoder.fit(XTrain.map(row => _isMissing(row[j]) ? finalMode : row[j]));
       encoders.set(j, encoder);
     }
-    XTrain = XTrain.map(row => {
-      const next = [...row];
-      for (const j of categoricalCols) {
-        next[j] = encoders.get(j).transform([next[j]])[0];
-      }
-      return next;
-    });
   }
 
-  XTrain = XTrain.map(row => row.map(v => Number(v)));
+  const expandedFeatureDefs = [];
+  for (let j = 0; j < fittedFeatureNames.length; j++) {
+    const sourceName = fittedFeatureNames[j];
+    if (numericCols.includes(j)) {
+      expandedFeatureDefs.push({
+        name: sourceName,
+        sourceName,
+        type: 'numeric',
+        fillValue: numericFillValues[numericCols.indexOf(j)] ?? 0,
+        transformed: transformedCols.has(j),
+      });
+      continue;
+    }
+    const encoder = encoders.get(j);
+    for (const category of encoder?.classes || []) {
+      expandedFeatureDefs.push({
+        name: `${sourceName}=${String(category)}`,
+        sourceName,
+        type: 'onehot',
+        category,
+        fillValue: categoricalModes.get(j),
+        transformed: false,
+      });
+    }
+  }
+
+  const expandRow = (row) => expandedFeatureDefs.map(def => {
+    const sourceIdx = fittedFeatureNames.indexOf(def.sourceName);
+    let value = row[sourceIdx];
+    if (def.type === 'numeric') return Number(value);
+    if (_isMissing(value)) value = def.fillValue;
+    return String(value) === String(def.category) ? 1 : 0;
+  });
+  XTrain = XTrain.map(expandRow);
+  featureNames = expandedFeatureDefs.map(def => def.name);
 
   let keepCols = Array.from({ length: featureNames.length }, (_, i) => i);
   if (removeMulticollinearity && XTrain.length > 0 && XTrain[0].length > 1) {
@@ -899,14 +1030,19 @@ export function prepareTrainTestFeatures(rawData, targetCol, options = {}) {
         const corr = _pearsonCorrelation(XTrain.map(row => row[a]), XTrain.map(row => row[b]));
         if (Math.abs(corr) > multicollinearityThreshold) {
           remove.add(b);
-          preprocessInfo.removedMulticollinear.push(fittedFeatureNames[b]);
+          preprocessInfo.removedMulticollinear.push(expandedFeatureDefs[b].name);
         }
       }
     }
     keepCols = keepCols.filter(i => !remove.has(i));
     XTrain = XTrain.map(row => keepCols.map(i => row[i]));
-    featureNames = keepCols.map(i => fittedFeatureNames[i]);
+    featureNames = keepCols.map(i => expandedFeatureDefs[i].name);
   }
+
+  const outputFeatureDefs = keepCols.map(i => ({ ...expandedFeatureDefs[i] }));
+  const inputFeatureNames = fittedFeatureNames.filter(name =>
+    outputFeatureDefs.some(def => def.sourceName === name)
+  );
 
   let scaler = null;
   if (scale) {
@@ -922,22 +1058,17 @@ export function prepareTrainTestFeatures(rawData, targetCol, options = {}) {
     X = X.map(row => {
       const next = [...row];
       numericCols.forEach((j, k) => {
-        if (_isMissing(next[j]) || Number.isNaN(Number(next[j]))) next[j] = numericFillValues[k];
+        if (!_isFiniteNumeric(next[j])) next[j] = numericFillValues[k];
         else next[j] = Number(next[j]);
       });
       for (const j of categoricalCols) {
         if (_isMissing(next[j])) next[j] = categoricalModes.get(j);
-        const encoder = encoders.get(j);
-        if (encoder && !encoder.classes.includes(next[j])) next[j] = categoricalModes.get(j);
       }
       for (const j of transformedCols) {
         next[j] = Math.log1p(Math.max(0, Number(next[j])));
       }
-      for (const j of categoricalCols) {
-        const encoder = encoders.get(j);
-        if (encoder) next[j] = encoder.transform([next[j]])[0];
-      }
-      return keepCols.map(i => Number(next[i]));
+      const expanded = expandRow(next);
+      return keepCols.map(i => Number(expanded[i]));
     });
     if (scaler) X = scaler.transform(X);
     if (!includeTarget) return X;
@@ -952,26 +1083,26 @@ export function prepareTrainTestFeatures(rawData, targetCol, options = {}) {
     return targetValues.map(Number);
   };
 
-  const featureSpecs = keepCols.map((oldIdx) => {
+  const featureSpecs = inputFeatureNames.map((name) => {
+    const oldIdx = fittedFeatureNames.indexOf(name);
     const isCategorical = categoricalCols.includes(oldIdx);
     return {
-      name: fittedFeatureNames[oldIdx],
+      name,
       type: isCategorical ? 'categorical' : 'numeric',
       categories: isCategorical && encoders.has(oldIdx) ? encoders.get(oldIdx).classes : null,
       transformed: transformedCols.has(oldIdx),
     };
   });
 
-  const transformInput = (inputValues, inputFeatureNames = featureNames) => {
-    const row = keepCols.map((oldIdx) => {
-      const name = fittedFeatureNames[oldIdx];
-      const finalIdx = inputFeatureNames.indexOf(name);
+  const transformInput = (inputValues, providedFeatureNames = inputFeatureNames) => {
+    const sourceRow = fittedFeatureNames.map((name, oldIdx) => {
+      const finalIdx = providedFeatureNames.indexOf(name);
       let value = finalIdx === -1 ? null : inputValues[finalIdx];
 
       if (numericCols.includes(oldIdx)) {
         const fillIdx = numericCols.indexOf(oldIdx);
         let numericValue = Number(value);
-        if (_isMissing(value) || Number.isNaN(numericValue)) {
+        if (!_isFiniteNumeric(value)) {
           numericValue = numericFillValues[fillIdx] ?? 0;
         }
         return transformedCols.has(oldIdx)
@@ -980,19 +1111,34 @@ export function prepareTrainTestFeatures(rawData, targetCol, options = {}) {
       }
 
       const encoder = encoders.get(oldIdx);
-      if (_isMissing(value) || (encoder && !encoder.classes.includes(value))) {
+      if (_isMissing(value)) {
         value = categoricalModes.get(oldIdx);
       }
-      return encoder ? encoder.transform([value])[0] : Number(value);
+      return encoder ? value : Number(value);
     });
+    const expanded = expandRow(sourceRow);
+    const row = keepCols.map(i => Number(expanded[i]));
     return scaler ? scaler.transform([row]) : [row];
+  };
+
+  const pipelineSpec = {
+    version: 1,
+    inputFeatureNames: [...inputFeatureNames],
+    outputFeatureNames: [...featureNames],
+    featureSpecs: featureSpecs.map(spec => ({
+      ...spec,
+      categories: spec.categories ? [...spec.categories] : null,
+    })),
+    outputFeatures: outputFeatureDefs.map(def => ({ ...def })),
   };
 
   const preprocessor = {
     featureNames: [...featureNames],
+    inputFeatureNames: [...inputFeatureNames],
     featureSpecs,
     transformRows,
     transformInput,
+    pipelineSpec,
     preprocessInfo,
   };
 
@@ -1010,6 +1156,7 @@ export function prepareTrainTestFeatures(rawData, targetCol, options = {}) {
     preprocessor,
     trainRows,
     testRows,
+    gapRows,
   };
 }
 
@@ -1045,13 +1192,14 @@ export function prepareTrainValidationFeatures(trainRowsInput, validationRowsInp
     multicollinearityThreshold = 0.95,
     transformFeatures = true,
     skewnessThreshold = 2.0,
+    splitColumn = null,
   } = options;
 
   const trainRows = (trainRowsInput || []).filter(row =>
-    !_isMissing(row?.[targetCol]) && (task !== 'regression' || !Number.isNaN(Number(row[targetCol])))
+    !_isMissing(row?.[targetCol]) && (task !== 'regression' || _isFiniteNumeric(row[targetCol]))
   );
   const validationRows = (validationRowsInput || []).filter(row =>
-    !_isMissing(row?.[targetCol]) && (task !== 'regression' || !Number.isNaN(Number(row[targetCol])))
+    !_isMissing(row?.[targetCol]) && (task !== 'regression' || _isFiniteNumeric(row[targetCol]))
   );
   if (trainRows.length < 2 || validationRows.length === 0) {
     throw new Error('prepareTrainValidationFeatures: fold has too few valid rows');
@@ -1063,8 +1211,8 @@ export function prepareTrainValidationFeatures(trainRowsInput, validationRowsInp
   }
   const initialFeatures = headers.filter(h => h !== targetCol);
   const requestedFeatures = selectedFeatures && selectedFeatures.length > 0
-    ? initialFeatures.filter(h => selectedFeatures.includes(h))
-    : initialFeatures;
+    ? initialFeatures.filter(h => selectedFeatures.includes(h) && h !== splitColumn)
+    : initialFeatures.filter(h => h !== splitColumn);
   if (requestedFeatures.length === 0) {
     throw new Error('prepareTrainValidationFeatures: 特徴量を1つ以上選択してください。');
   }
@@ -1094,7 +1242,7 @@ export function prepareTrainValidationFeatures(trainRowsInput, validationRowsInp
   let yTrain;
   let yTest;
   if (task === 'classification') {
-    const targetNumeric = yRawTrain.every(v => !Number.isNaN(Number(v)));
+    const targetNumeric = yRawTrain.every(_isFiniteNumeric);
     if (targetNumeric) {
       yTrain = yRawTrain.map(Number);
       yTest = yRawTest.map(Number);
@@ -1113,7 +1261,7 @@ export function prepareTrainValidationFeatures(trainRowsInput, validationRowsInp
   const categoricalCols = [];
   for (let j = 0; j < fittedFeatureNames.length; j++) {
     const values = trainRows.map(row => row[fittedFeatureNames[j]]).filter(v => !_isMissing(v));
-    const isNumeric = values.length > 0 && values.every(v => !Number.isNaN(Number(v)));
+    const isNumeric = values.length > 0 && values.every(_isFiniteNumeric);
     if (isNumeric) numericCols.push(j);
     else categoricalCols.push(j);
   }
@@ -1204,20 +1352,49 @@ export function prepareTrainValidationFeatures(trainRowsInput, validationRowsInp
 
   if (categoricalCols.length > 0) {
     for (const j of categoricalCols) {
-      const encoder = new LabelEncoder();
-      encoder.fit(XTrain.map(row => row[j]));
+      const finalMode = _modeCategorical(XTrain.map(row => row[j])) ?? categoricalModes.get(j) ?? '__missing__';
+      categoricalModes.set(j, finalMode);
+      const encoder = new OneHotEncoder({ handleUnknown: 'ignore' });
+      encoder.fit(XTrain.map(row => _isMissing(row[j]) ? finalMode : row[j]));
       encoders.set(j, encoder);
     }
-    XTrain = XTrain.map(row => {
-      const next = [...row];
-      for (const j of categoricalCols) {
-        next[j] = encoders.get(j).transform([next[j]])[0];
-      }
-      return next;
-    });
   }
 
-  XTrain = XTrain.map(row => row.map(v => Number(v)));
+  const expandedFeatureDefs = [];
+  for (let j = 0; j < fittedFeatureNames.length; j++) {
+    const sourceName = fittedFeatureNames[j];
+    if (numericCols.includes(j)) {
+      expandedFeatureDefs.push({
+        name: sourceName,
+        sourceName,
+        type: 'numeric',
+        fillValue: numericFillValues[numericCols.indexOf(j)] ?? 0,
+        transformed: transformedCols.has(j),
+      });
+      continue;
+    }
+    const encoder = encoders.get(j);
+    for (const category of encoder?.classes || []) {
+      expandedFeatureDefs.push({
+        name: `${sourceName}=${String(category)}`,
+        sourceName,
+        type: 'onehot',
+        category,
+        fillValue: categoricalModes.get(j),
+        transformed: false,
+      });
+    }
+  }
+
+  const expandRow = (row) => expandedFeatureDefs.map(def => {
+    const sourceIdx = fittedFeatureNames.indexOf(def.sourceName);
+    let value = row[sourceIdx];
+    if (def.type === 'numeric') return Number(value);
+    if (_isMissing(value)) value = def.fillValue;
+    return String(value) === String(def.category) ? 1 : 0;
+  });
+  XTrain = XTrain.map(expandRow);
+  featureNames = expandedFeatureDefs.map(def => def.name);
 
   let keepCols = Array.from({ length: featureNames.length }, (_, i) => i);
   if (removeMulticollinearity && XTrain.length > 0 && XTrain[0].length > 1) {
@@ -1229,13 +1406,13 @@ export function prepareTrainValidationFeatures(trainRowsInput, validationRowsInp
         const corr = _pearsonCorrelation(XTrain.map(row => row[a]), XTrain.map(row => row[b]));
         if (Math.abs(corr) > multicollinearityThreshold) {
           remove.add(b);
-          preprocessInfo.removedMulticollinear.push(fittedFeatureNames[b]);
+          preprocessInfo.removedMulticollinear.push(expandedFeatureDefs[b].name);
         }
       }
     }
     keepCols = keepCols.filter(i => !remove.has(i));
     XTrain = XTrain.map(row => keepCols.map(i => row[i]));
-    featureNames = keepCols.map(i => fittedFeatureNames[i]);
+    featureNames = keepCols.map(i => expandedFeatureDefs[i].name);
   }
 
   let scaler = null;
@@ -1248,22 +1425,17 @@ export function prepareTrainValidationFeatures(trainRowsInput, validationRowsInp
   XTest = XTest.map(row => {
     const next = [...row];
     numericCols.forEach((j, k) => {
-      if (_isMissing(next[j]) || Number.isNaN(Number(next[j]))) next[j] = numericFillValues[k];
+      if (!_isFiniteNumeric(next[j])) next[j] = numericFillValues[k];
       else next[j] = Number(next[j]);
     });
     for (const j of categoricalCols) {
       if (_isMissing(next[j])) next[j] = categoricalModes.get(j);
-      const encoder = encoders.get(j);
-      if (encoder && !encoder.classes.includes(next[j])) next[j] = categoricalModes.get(j);
     }
     for (const j of transformedCols) {
       next[j] = Math.log1p(Math.max(0, Number(next[j])));
     }
-    for (const j of categoricalCols) {
-      const encoder = encoders.get(j);
-      if (encoder) next[j] = encoder.transform([next[j]])[0];
-    }
-    return keepCols.map(i => Number(next[i]));
+    const expanded = expandRow(next);
+    return keepCols.map(i => Number(expanded[i]));
   });
   if (scaler) XTest = scaler.transform(XTest);
 
@@ -1350,7 +1522,7 @@ export function prepareFeatures(rawData, targetCol, options = {}) {
   let y;
   let labelEncoder = null;
   if (task === 'classification') {
-    const isTargetNumeric = yRaw.every(v => v != null && !isNaN(Number(v)));
+    const isTargetNumeric = yRaw.every(_isFiniteNumeric);
     if (isTargetNumeric) {
       y = yRaw.map(Number);
     } else {
@@ -1368,7 +1540,7 @@ export function prepareFeatures(rawData, targetCol, options = {}) {
 
   for (let j = 0; j < featureNames.length; j++) {
     const colValues = _column(X, j).filter((v) => v != null);
-    const isNumeric = colValues.length > 0 && colValues.every((v) => typeof v === 'number' || !Number.isNaN(Number(v)));
+    const isNumeric = colValues.length > 0 && colValues.every(_isFiniteNumeric);
     if (isNumeric) {
       numericCols.push(j);
     } else {
@@ -1381,7 +1553,7 @@ export function prepareFeatures(rawData, targetCol, options = {}) {
     row.map((val, j) => {
       if (numericCols.includes(j) && val != null) {
         const n = Number(val);
-        return Number.isNaN(n) ? null : n;
+        return Number.isFinite(n) ? n : null;
       }
       return val;
     })
@@ -1413,7 +1585,7 @@ export function prepareFeatures(rawData, targetCol, options = {}) {
   if (removeOutliers && numericCols.length > 0) {
     const keepMask = Array(X.length).fill(true);
     for (const j of numericCols) {
-      const vals = X.map(row => row[j]).filter(v => v != null && !Number.isNaN(v));
+      const vals = X.map(row => row[j]).filter(Number.isFinite);
       if (vals.length < 10) continue; // skip columns with too few values
       const sorted = [...vals].sort((a, b) => a - b);
       const q1 = sorted[Math.floor(sorted.length * 0.25)];
@@ -1438,7 +1610,7 @@ export function prepareFeatures(rawData, targetCol, options = {}) {
   // --- 5.6 Feature transformation (log for skewed features) ----------------
   if (transformFeatures && numericCols.length > 0) {
     for (const j of numericCols) {
-      const vals = X.map(row => row[j]).filter(v => v != null && !Number.isNaN(v));
+      const vals = X.map(row => row[j]).filter(Number.isFinite);
       if (vals.length < 5) continue;
       const n = vals.length;
       const mu = vals.reduce((s, v) => s + v, 0) / n;

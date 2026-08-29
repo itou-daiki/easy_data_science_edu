@@ -2,7 +2,8 @@
 // 動画分析 (Video Analysis) - Splyzaライク
 // ローカル動画の再生・コマ送り・描画・タグ記録・2動画比較・ポーズ推定
 // ==========================================
-import { createStepIndicator } from '../utils.js';
+import { bindAccessibleTabs, createStepIndicator, toCSV } from '../utils.js';
+import { tr } from '../i18n.js';
 import {
     createAnnotationState,
     renderAnnotations,
@@ -19,6 +20,7 @@ import {
     drawPoseOverlay,
     computeJointAngles,
     startContinuousDetection,
+    disposePoseDetector,
     exportPoseSeriesCSV,
     POSE_ANGLE_DEFS
 } from './video_analysis/pose.js';
@@ -26,6 +28,7 @@ import {
 const STEPS = ['メディア準備', '解析・記録', '出力'];
 
 const THEME = '#dc2626';
+const MAX_ANNOTATION_FILE_BYTES = 5 * 1024 * 1024;
 const THEME_LIGHT = 'rgba(220, 38, 38, 0.08)';
 const THEME_BORDER = 'rgba(220, 38, 38, 0.35)';
 const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 1.5, 2];
@@ -67,12 +70,13 @@ let _idSeq = 1;
 function _newId(prefix) { return `${prefix}-${Date.now().toString(36)}-${_idSeq++}`; }
 
 let _state = null;
-let _keysBound = false;
+let _keyboardHandler = null;
 
 // ==========================================
 // Render Entry
 // ==========================================
 export function render(container) {
+    dispose();
     _state = _createInitialState();
     container.innerHTML = _buildLayout();
     _bindGlobalUI(container);
@@ -83,6 +87,32 @@ export function render(container) {
     _switchMode('single');
     _switchTool('draw');
     _startRenderLoop();
+}
+
+export function dispose() {
+    if (_state) {
+        if (_state.rafId != null) cancelAnimationFrame(_state.rafId);
+        for (const target of ['A', 'B']) {
+            const t = _state.targets?.[target];
+            if (!t) continue;
+            if (t.detachDrawing) t.detachDrawing();
+            if (t.pose?.continuous) t.pose.continuous.stop();
+            if (t.video) {
+                t.video.pause();
+                t.video.removeAttribute('src');
+                t.video.load();
+            }
+            if (t.image) t.image.removeAttribute('src');
+            if (t.url) URL.revokeObjectURL(t.url);
+        }
+        document.querySelectorAll('.va-root .js-plotly-plot').forEach(plot => globalThis.Plotly?.purge(plot));
+    }
+    if (_keyboardHandler) {
+        document.removeEventListener('keydown', _keyboardHandler);
+        _keyboardHandler = null;
+    }
+    disposePoseDetector().catch(error => console.warn('ポーズ推定モデルの解放に失敗しました:', error));
+    _state = null;
 }
 
 function _createInitialState() {
@@ -171,9 +201,9 @@ function _buildLayout() {
                 動画 (mp4 / webm / mov / ogg) または画像 (jpg / png / webp / gif / bmp) を読み込みます。
                 <strong>2メディア比較</strong>に切り替えると、左右並べて同時に分析できます。
             </p>
-            <div class="va-mode-toggle" role="tablist" style="margin-bottom: 1rem;">
-                <button class="va-mode-btn active" data-mode="single"><i class="fas fa-square"></i> 単一メディア</button>
-                <button class="va-mode-btn" data-mode="compare"><i class="fas fa-clone"></i> 2メディア比較</button>
+            <div class="va-mode-toggle" role="group" aria-label="表示モード" style="margin-bottom: 1rem;">
+                <button class="va-mode-btn active" data-mode="single" aria-pressed="true"><i class="fas fa-square"></i> 単一メディア</button>
+                <button class="va-mode-btn" data-mode="compare" aria-pressed="false"><i class="fas fa-clone"></i> 2メディア比較</button>
             </div>
 
             <div class="va-stage va-stage-single">
@@ -205,14 +235,14 @@ function _buildLayout() {
                 描画でフォームを示したり、タグでイベントを打刻したり、ポーズ推定で骨格を観察します。
                 ツールはタブで切り替えできます。
             </p>
-            <div class="tab-container" id="va-tool-tabs">
-                <button class="tab-btn active" data-tool="draw"><i class="fas fa-pen"></i> 描画</button>
-                <button class="tab-btn" data-tool="tag"><i class="fas fa-tags"></i> タグ / イベント</button>
-                <button class="tab-btn" data-tool="pose"><i class="fas fa-person-running"></i> ポーズ推定</button>
+            <div class="tab-container" id="va-tool-tabs" role="tablist" aria-label="動画分析ツール">
+                <button id="va-tab-draw" class="tab-btn active" data-tool="draw" role="tab" aria-controls="va-pane-draw" aria-selected="true"><i class="fas fa-pen"></i> 描画</button>
+                <button id="va-tab-tag" class="tab-btn" data-tool="tag" role="tab" aria-controls="va-pane-tag" aria-selected="false" tabindex="-1"><i class="fas fa-tags"></i> タグ / イベント</button>
+                <button id="va-tab-pose" class="tab-btn" data-tool="pose" role="tab" aria-controls="va-pane-pose" aria-selected="false" tabindex="-1"><i class="fas fa-person-running"></i> ポーズ推定</button>
             </div>
-            <div class="tab-content active" data-tool="draw" id="va-pane-draw"></div>
-            <div class="tab-content" data-tool="tag" id="va-pane-tag"></div>
-            <div class="tab-content" data-tool="pose" id="va-pane-pose"></div>
+            <div class="tab-content active" data-tool="draw" id="va-pane-draw" role="tabpanel" aria-labelledby="va-tab-draw"></div>
+            <div class="tab-content" data-tool="tag" id="va-pane-tag" role="tabpanel" aria-labelledby="va-tab-tag" hidden></div>
+            <div class="tab-content" data-tool="pose" id="va-pane-pose" role="tabpanel" aria-labelledby="va-tab-pose" hidden></div>
         </div>
 
         <!-- Step 3: 出力・サマリー -->
@@ -339,9 +369,7 @@ function _bindGlobalUI(root) {
         }
         _downloadFile(`pose_angles_${_state.active}.csv`, exportPoseSeriesCSV(samples), 'text/csv');
     });
-    root.querySelectorAll('#va-tool-tabs .tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => _switchTool(btn.dataset.tool));
-    });
+    bindAccessibleTabs(root.querySelector('#va-tool-tabs').parentElement);
 
     root.querySelector('#va-sync-enabled').addEventListener('change', (e) => {
         _state.syncEnabled = e.target.checked;
@@ -654,7 +682,11 @@ function _clearTarget(target) {
 function _switchMode(mode) {
     _state.mode = mode;
     const root = document.querySelector('.va-root');
-    root.querySelectorAll('.va-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+    root.querySelectorAll('.va-mode-btn').forEach(b => {
+        const isActive = b.dataset.mode === mode;
+        b.classList.toggle('active', isActive);
+        b.setAttribute('aria-pressed', String(isActive));
+    });
     root.querySelector('.va-stage').classList.toggle('va-stage-compare', mode === 'compare');
     root.querySelector('.va-stage').classList.toggle('va-stage-single', mode === 'single');
     root.querySelector('.va-sync-bar').style.display = mode === 'compare' ? 'flex' : 'none';
@@ -734,8 +766,9 @@ function _refreshPlayToggle(target) {
 // Render Loop
 // ==========================================
 function _startRenderLoop() {
-    cancelAnimationFrame(_state.rafId);
+    if (_state.rafId != null) cancelAnimationFrame(_state.rafId);
     const tick = () => {
+        if (!_state) return;
         ['A', 'B'].forEach(target => {
             const t = _state.targets[target];
             if (!t.media || !t.canvas || !t.ctx) return;
@@ -788,8 +821,8 @@ function _stepFrame(target, dir) {
 // ==========================================
 function _switchTool(toolName) {
     const root = document.querySelector('.va-root');
-    root.querySelectorAll('#va-tool-tabs .tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tool === toolName));
-    root.querySelectorAll('.tab-content[data-tool]').forEach(p => p.classList.toggle('active', p.dataset.tool === toolName));
+    const tab = root.querySelector(`#va-tool-tabs .tab-btn[data-tool="${CSS.escape(toolName)}"]`);
+    if (tab && tab.getAttribute('aria-selected') !== 'true') tab.click();
 }
 
 function _renderToolPanes() {
@@ -877,6 +910,11 @@ function _renderDrawPane() {
     importInput.addEventListener('change', (e) => {
         const f = e.target.files && e.target.files[0];
         if (!f) return;
+        if (f.size > MAX_ANNOTATION_FILE_BYTES) {
+            alert(tr('アノテーションJSONは5 MiB以下のファイルを選択してください。'));
+            e.target.value = '';
+            return;
+        }
         const reader = new FileReader();
         reader.onload = () => {
             try {
@@ -884,6 +922,8 @@ function _renderDrawPane() {
                 alert(`${_activeAnnotationState().items.length} 件のアノテーションを読み込みました。`);
             } catch (err) {
                 alert('JSON読み込みに失敗しました: ' + err.message);
+            } finally {
+                e.target.value = '';
             }
         };
         reader.readAsText(f);
@@ -1195,7 +1235,8 @@ function _refreshTagStrip(target) {
 }
 
 function _exportTagsCSV() {
-    const rows = [['target', 'time_sec', 'time', 'label', 'color', 'comment']];
+    const headers = ['target', 'time_sec', 'time', 'label', 'color', 'comment'];
+    const rows = [];
     ['A', 'B'].forEach(target => {
         _state.targets[target].tags.forEach(tag => {
             rows.push([
@@ -1204,12 +1245,11 @@ function _exportTagsCSV() {
                 _fmtTime(tag.time),
                 tag.label,
                 tag.color,
-                (tag.comment || '').replace(/"/g, '""')
+                tag.comment || ''
             ]);
         });
     });
-    const csv = rows.map(r => r.map(c => /[",\n]/.test(String(c)) ? `"${c}"` : String(c)).join(',')).join('\n');
-    _downloadFile('tags.csv', csv, 'text/csv');
+    _downloadFile('tags.csv', toCSV(headers, rows), 'text/csv');
 }
 
 // ==========================================
@@ -1471,9 +1511,8 @@ function _refreshActiveDependentUI() {
 // Keyboard Shortcuts
 // ==========================================
 function _bindKeyboardShortcuts() {
-    if (_keysBound) return;
-    _keysBound = true;
-    document.addEventListener('keydown', (e) => {
+    if (_keyboardHandler) return;
+    _keyboardHandler = (e) => {
         // 現在の分析が動画分析である場合のみ処理
         if (!document.querySelector('.va-root')) return;
         const tag = (e.target && e.target.tagName) || '';
@@ -1500,7 +1539,8 @@ function _bindKeyboardShortcuts() {
             const def = _state.tagDefs.find(d => d.hotkey === e.key);
             if (def) { _recordTag(def); e.preventDefault(); }
         }
-    });
+    };
+    document.addEventListener('keydown', _keyboardHandler);
 }
 
 // ==========================================

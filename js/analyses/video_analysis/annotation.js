@@ -7,6 +7,9 @@ const TOOLS = ['pen', 'line', 'arrow', 'circle', 'rect'];
 const DEFAULT_DURATION_SEC = 2.0;
 const DEFAULT_COLOR = '#ef4444';
 const DEFAULT_THICKNESS = 4;
+const MAX_ANNOTATIONS = 5000;
+const MAX_POINTS_PER_ANNOTATION = 10000;
+const MAX_TOTAL_POINTS = 100000;
 
 let _idCounter = 1;
 function _newId() { return `anno-${Date.now().toString(36)}-${_idCounter++}`; }
@@ -226,18 +229,66 @@ export function exportAnnotationsJSON(state) {
 
 export function importAnnotationsJSON(state, jsonText) {
     const parsed = JSON.parse(jsonText);
-    if (!parsed || !Array.isArray(parsed.items)) {
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.items)) {
         throw new Error('アノテーションJSONの形式が不正です');
     }
-    state.items = parsed.items.map(it => ({
-        id: it.id || _newId(),
-        tool: TOOLS.includes(it.tool) ? it.tool : 'pen',
-        color: it.color || DEFAULT_COLOR,
-        thickness: Number(it.thickness) || DEFAULT_THICKNESS,
-        durationSec: Number(it.durationSec) || DEFAULT_DURATION_SEC,
-        time: Number(it.time) || 0,
-        points: Array.isArray(it.points) ? it.points.map(p => ({ nx: Number(p.nx) || 0, ny: Number(p.ny) || 0 })) : []
-    }));
+    if (parsed.version != null && parsed.version !== 1) {
+        throw new Error('未対応のアノテーションJSONバージョンです');
+    }
+    if (parsed.items.length > MAX_ANNOTATIONS) {
+        throw new Error(`アノテーションは最大${MAX_ANNOTATIONS}件まで読み込めます`);
+    }
+
+    let totalPoints = 0;
+    const items = parsed.items.map((item, index) => {
+        if (!item || typeof item !== 'object' || !TOOLS.includes(item.tool)) {
+            throw new Error(`${index + 1}件目の描画ツールが不正です`);
+        }
+        if (!Array.isArray(item.points) || item.points.length > MAX_POINTS_PER_ANNOTATION) {
+            throw new Error(`${index + 1}件目の座標数が不正です`);
+        }
+        totalPoints += item.points.length;
+        if (totalPoints > MAX_TOTAL_POINTS) {
+            throw new Error(`座標点は合計${MAX_TOTAL_POINTS}点まで読み込めます`);
+        }
+
+        const thickness = requireFiniteRange(item.thickness, 1, 20, `${index + 1}件目の太さ`);
+        const durationSec = requireFiniteRange(item.durationSec, 0.1, 3600, `${index + 1}件目の表示秒数`);
+        const time = requireFiniteRange(item.time, 0, Number.MAX_SAFE_INTEGER, `${index + 1}件目の時刻`);
+        const color = typeof item.color === 'string' && /^#[0-9a-f]{6}$/i.test(item.color)
+            ? item.color
+            : null;
+        if (!color) throw new Error(`${index + 1}件目の色が不正です`);
+
+        const points = item.points.map((point, pointIndex) => {
+            if (!point || typeof point !== 'object') {
+                throw new Error(`${index + 1}件目の${pointIndex + 1}番目の座標が不正です`);
+            }
+            return {
+                nx: requireFiniteRange(point.nx, 0, 1, `${index + 1}件目のx座標`),
+                ny: requireFiniteRange(point.ny, 0, 1, `${index + 1}件目のy座標`)
+            };
+        });
+
+        return {
+            id: typeof item.id === 'string' && item.id.length <= 128 ? item.id : _newId(),
+            tool: item.tool,
+            color,
+            thickness,
+            durationSec,
+            time,
+            points
+        };
+    });
+
+    state.items = items;
+}
+
+function requireFiniteRange(value, min, max, label) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) {
+        throw new Error(`${label}が範囲外です`);
+    }
+    return value;
 }
 
 export const ANNOTATION_TOOLS = TOOLS.slice();

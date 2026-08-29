@@ -2,7 +2,9 @@
 // 音声分類 (Audio Classification) Module
 // Web Audio API + TensorFlow.js によるブラウザ音声分類
 // ==========================================
-import { createStepIndicator, formatNumber, renderPlot } from '../utils.js';
+import { createStepIndicator, escapeHtml, formatNumber, renderPlot } from '../utils.js';
+import { ensureTensorFlow } from '../dependencies.js';
+import { trainTestSplit } from '../ml/model_selection.js';
 
 const STEPS = ['データ準備', '学習', '評価', '予測'];
 const ACCENT = '#7c3aed';
@@ -12,21 +14,12 @@ const RECORDING_DURATION_MS = 3000;
 const NUM_FRAMES = 20;
 const FEATURES_PER_FRAME = 4;
 const FEATURE_DIM = NUM_FRAMES * FEATURES_PER_FRAME; // 80
+const MAX_AUDIO_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_AUDIO_DURATION_SECONDS = 30;
+const MAX_AUDIO_SAMPLES_PER_CLASS = 100;
 
-// ==========================================
-// TensorFlow.js Loader
-// ==========================================
-
-async function ensureTensorFlow() {
-    if (typeof tf !== 'undefined') return;
-    return new Promise((resolve, reject) => {
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js';
-        script.onload = () => resolve();
-        script.onerror = () => reject(new Error('TensorFlow.js の読み込みに失敗しました。'));
-        document.head.appendChild(script);
-    });
-}
+let _activeState = null;
+let _activeRecording = null;
 
 // ==========================================
 // FFT Implementation (radix-2)
@@ -155,28 +148,43 @@ async function startRecording(durationMs = RECORDING_DURATION_MS) {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const mediaRecorder = new MediaRecorder(stream);
     const chunks = [];
+    const session = { stream, mediaRecorder, timeoutId: null, cancelled: false };
+    _activeRecording = session;
 
     return new Promise((resolve, reject) => {
         mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
         mediaRecorder.onerror = (e) => {
+            if (_activeRecording === session) {
+                clearTimeout(session.timeoutId);
+                _activeRecording = null;
+            }
             stream.getTracks().forEach(t => t.stop());
             reject(new Error('録音中にエラーが発生しました。'));
         };
         mediaRecorder.onstop = async () => {
+            if (_activeRecording === session) {
+                clearTimeout(session.timeoutId);
+                _activeRecording = null;
+            }
             stream.getTracks().forEach(t => t.stop());
+            if (session.cancelled) {
+                reject(new DOMException('録音を中止しました。', 'AbortError'));
+                return;
+            }
+            const audioCtx = new AudioContext();
             try {
                 const blob = new Blob(chunks, { type: 'audio/webm' });
                 const arrayBuffer = await blob.arrayBuffer();
-                const audioCtx = new AudioContext();
                 const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-                await audioCtx.close();
                 resolve({ audioBuffer, blob });
             } catch (err) {
                 reject(new Error('録音データのデコードに失敗しました。'));
+            } finally {
+                await audioCtx.close().catch(() => {});
             }
         };
         mediaRecorder.start();
-        setTimeout(() => {
+        session.timeoutId = setTimeout(() => {
             if (mediaRecorder.state === 'recording') {
                 mediaRecorder.stop();
             }
@@ -185,12 +193,21 @@ async function startRecording(durationMs = RECORDING_DURATION_MS) {
 }
 
 async function loadAudioFile(file) {
+    if (file.size > MAX_AUDIO_FILE_BYTES) {
+        throw new Error('音声ファイル1件あたりの上限は25 MiBです。');
+    }
     const arrayBuffer = await file.arrayBuffer();
     const audioCtx = new AudioContext();
-    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-    await audioCtx.close();
-    const blob = new Blob([arrayBuffer], { type: file.type });
-    return { audioBuffer, blob };
+    try {
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+        if (!Number.isFinite(audioBuffer.duration) || audioBuffer.duration <= 0 || audioBuffer.duration > MAX_AUDIO_DURATION_SECONDS) {
+            throw new Error(`音声は${MAX_AUDIO_DURATION_SECONDS}秒以下のファイルを使用してください。`);
+        }
+        const blob = new Blob([arrayBuffer], { type: file.type });
+        return { audioBuffer, blob };
+    } finally {
+        await audioCtx.close().catch(() => {});
+    }
 }
 
 // ==========================================
@@ -260,6 +277,7 @@ function normalizeFeatures(features, stats) {
 // ==========================================
 
 export function render(container, _data, _characteristics) {
+    dispose();
     const state = {
         classes: [],
         model: null,
@@ -267,9 +285,26 @@ export function render(container, _data, _characteristics) {
         trainHistory: null,
         currentStep: 0
     };
+    _activeState = state;
 
     container.innerHTML = buildInitialHTML();
     bindStep1Events(container, state);
+}
+
+export function dispose() {
+    if (_activeState?.model?.dispose) _activeState.model.dispose();
+    if (_activeRecording) {
+        const recording = _activeRecording;
+        _activeRecording = null;
+        recording.cancelled = true;
+        clearTimeout(recording.timeoutId);
+        if (recording.mediaRecorder.state === 'recording') {
+            recording.mediaRecorder.stop();
+        }
+        recording.stream.getTracks().forEach(track => track.stop());
+    }
+    _activeState = null;
+    document.querySelectorAll('#ac-step3 .js-plotly-plot').forEach(plot => globalThis.Plotly?.purge(plot));
 }
 
 function buildInitialHTML() {
@@ -337,7 +372,24 @@ function bindStep1Events(container, state) {
         if (e.key === 'Enter') addClass();
     });
 
-    trainBtn.addEventListener('click', () => runTraining(container, state));
+    trainBtn.addEventListener('click', async () => {
+        trainBtn.disabled = true;
+        try {
+            await runTraining(container, state);
+        } catch (error) {
+            if (_activeState !== state) return;
+            console.error('Audio training failed:', error);
+            const step1 = container.querySelector('#ac-step1');
+            const step2 = container.querySelector('#ac-step2');
+            if (step1) step1.style.display = 'block';
+            if (step2) step2.style.display = 'none';
+            const indicator = container.querySelector('.step-indicator');
+            if (indicator) indicator.outerHTML = createStepIndicator(STEPS, 0);
+            alert(`学習に失敗しました: ${error.message}`);
+        } finally {
+            if (_activeState === state) trainBtn.disabled = false;
+        }
+    });
 }
 
 function updateTrainButton(state, trainBtn) {
@@ -356,7 +408,7 @@ function renderClasses(container, state) {
                     padding: 1rem; margin-bottom: 1rem; background: white;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
                 <h4 style="margin: 0; color: ${ACCENT};">
-                    <i class="fas fa-tag"></i> <span data-i18n-ignore>${cls.name}</span>
+                    <i class="fas fa-tag"></i> <span data-i18n-ignore>${escapeHtml(cls.name)}</span>
                     <span style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 400;">
                         (${cls.samples.length} サンプル)
                     </span>
@@ -374,7 +426,7 @@ function renderClasses(container, state) {
                         <input type="file" accept="audio/*" class="ac-upload-input" data-ci="${ci}"
                                style="display: none;" multiple>
                     </label>
-                    <button class="ac-remove-class" data-ci="${ci}"
+                    <button class="ac-remove-class" data-ci="${ci}" aria-label="${escapeHtml(cls.name)}を削除"
                         style="padding: 0.4rem 0.5rem; background: #f1f5f9; color: #64748b;
                                border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem;">
                         <i class="fas fa-trash"></i>
@@ -419,7 +471,7 @@ function renderClasses(container, state) {
                 renderClasses(container, state);
                 updateTrainButton(state, trainBtn);
             } catch (err) {
-                handleAudioError(err);
+                if (_activeState === state && err.name !== 'AbortError') handleAudioError(err);
             } finally {
                 indicator.style.display = 'none';
                 btn.disabled = false;
@@ -434,6 +486,9 @@ function renderClasses(container, state) {
             const files = Array.from(e.target.files);
             for (const file of files) {
                 try {
+                    if (state.classes[ci].samples.length >= MAX_AUDIO_SAMPLES_PER_CLASS) {
+                        throw new Error(`1クラスあたり最大${MAX_AUDIO_SAMPLES_PER_CLASS}件まで追加できます。`);
+                    }
                     const { audioBuffer, blob } = await loadAudioFile(file);
                     const features = extractAudioFeatures(audioBuffer);
                     const updatedSamples = [...state.classes[ci].samples, { audioBuffer, blob, features }];
@@ -490,8 +545,10 @@ function renderClasses(container, state) {
             if (sample) {
                 const url = URL.createObjectURL(sample.blob);
                 const audio = new Audio(url);
-                audio.onended = () => URL.revokeObjectURL(url);
-                audio.play().catch(() => {});
+                const release = () => URL.revokeObjectURL(url);
+                audio.onended = release;
+                audio.onerror = release;
+                audio.play().catch(release);
             }
         });
     });
@@ -504,11 +561,11 @@ function sampleCard(ci, si, _sample) {
             <canvas class="ac-waveform-canvas" data-ci="${ci}" data-si="${si}"
                     width="80" height="30"
                     style="border-radius: 4px; cursor: pointer;"></canvas>
-            <button class="ac-play-btn" data-ci="${ci}" data-si="${si}"
+            <button class="ac-play-btn" data-ci="${ci}" data-si="${si}" aria-label="音声サンプルを再生"
                     style="background: none; border: none; color: ${ACCENT}; cursor: pointer; font-size: 1rem;">
                 <i class="fas fa-play-circle"></i>
             </button>
-            <button class="ac-remove-sample" data-ci="${ci}" data-si="${si}"
+            <button class="ac-remove-sample" data-ci="${ci}" data-si="${si}" aria-label="音声サンプルを削除"
                     style="background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 0.85rem;">
                 <i class="fas fa-times"></i>
             </button>
@@ -556,7 +613,7 @@ async function runTraining(container, state) {
     } catch (err) {
         step2.querySelector('#ac-train-progress').innerHTML = `
             <p style="color: #ef4444; font-weight: 600;">
-                <i class="fas fa-exclamation-triangle"></i> ${err.message}
+                <i class="fas fa-exclamation-triangle"></i> ${escapeHtml(err.message)}
             </p>
             <p style="color: var(--text-secondary); margin-top: 0.5rem;">
                 インターネット接続を確認してページを再読み込みしてください。
@@ -564,6 +621,7 @@ async function runTraining(container, state) {
         `;
         return;
     }
+    if (_activeState !== state) return;
 
     const progressEl = step2.querySelector('#ac-train-progress');
     progressEl.innerHTML = `
@@ -586,10 +644,22 @@ async function runTraining(container, state) {
         }
     }
 
-    // Normalize features
-    const normStats = computeNormStats(allFeatures);
+    const indexRows = allFeatures.map((_, index) => [index]);
+    const split = trainTestSplit(indexRows, allLabels, {
+        testSize: 0.2,
+        stratify: true,
+        randomState: 42
+    });
+    const trainIndices = split.XTrain.map(([index]) => index);
+    const validationIndices = split.XTest.map(([index]) => index);
+    const trainFeaturesRaw = trainIndices.map(index => allFeatures[index]);
+    const validationFeaturesRaw = validationIndices.map(index => allFeatures[index]);
+
+    // Fit normalization on the training partition only.
+    const normStats = computeNormStats(trainFeaturesRaw);
     state.normStats = normStats;
-    const normalizedFeatures = allFeatures.map(f => normalizeFeatures(f, normStats));
+    const trainFeatures = trainFeaturesRaw.map(features => normalizeFeatures(features, normStats));
+    const validationFeatures = validationFeaturesRaw.map(features => normalizeFeatures(features, normStats));
 
     progressEl.innerHTML = `
         <i class="fas fa-brain fa-2x" style="color: ${ACCENT};"></i>
@@ -617,53 +687,70 @@ async function runTraining(container, state) {
         metrics: ['accuracy']
     });
 
-    const xs = tf.tensor2d(normalizedFeatures);
-    const ys = tf.tensor1d(allLabels, 'int32');
+    const xs = tf.tensor2d(trainFeatures);
+    const ys = tf.tensor1d(split.yTrain, 'int32');
+    const validationXs = tf.tensor2d(validationFeatures);
+    const validationYs = tf.tensor1d(split.yTest, 'int32');
 
     const totalEpochs = 100;
     const epochInfo = progressEl.querySelector('#ac-epoch-info');
     const progressBar = progressEl.querySelector('#ac-progress-bar');
-    const historyLog = { loss: [], acc: [] };
+    const historyLog = { loss: [], acc: [], valLoss: [], valAcc: [] };
 
-    await model.fit(xs, ys, {
-        epochs: totalEpochs,
-        batchSize: Math.min(32, normalizedFeatures.length),
-        shuffle: true,
-        validationSplit: normalizedFeatures.length >= 10 ? 0.2 : 0,
-        callbacks: {
-            onEpochEnd: (epoch, logs) => {
-                historyLog.loss.push(logs.loss);
-                historyLog.acc.push(logs.acc);
-                const pct = ((epoch + 1) / totalEpochs * 100).toFixed(0);
-                progressBar.style.width = `${pct}%`;
-                epochInfo.textContent =
-                    `Epoch ${epoch + 1}/${totalEpochs} — Loss: ${formatNumber(logs.loss)} — Accuracy: ${formatNumber(logs.acc)}`;
+    let fitted = false;
+    try {
+        await model.fit(xs, ys, {
+            epochs: totalEpochs,
+            batchSize: Math.min(32, trainFeatures.length),
+            shuffle: true,
+            validationData: [validationXs, validationYs],
+            callbacks: {
+                onEpochEnd: (epoch, logs) => {
+                    if (_activeState !== state) model.stopTraining = true;
+                    historyLog.loss.push(logs.loss);
+                    historyLog.acc.push(logs.acc);
+                    historyLog.valLoss.push(logs.val_loss);
+                    historyLog.valAcc.push(logs.val_acc);
+                    const pct = ((epoch + 1) / totalEpochs * 100).toFixed(0);
+                    progressBar.style.width = `${pct}%`;
+                    epochInfo.textContent =
+                        `Epoch ${epoch + 1}/${totalEpochs} — Train: ${formatNumber(logs.acc)} — Validation: ${formatNumber(logs.val_acc)}`;
+                }
             }
-        }
-    });
+        });
+        fitted = true;
+    } finally {
+        xs.dispose();
+        ys.dispose();
+        validationXs.dispose();
+        validationYs.dispose();
+        if (!fitted) model.dispose();
+    }
 
-    xs.dispose();
-    ys.dispose();
+    if (_activeState !== state) {
+        model.dispose();
+        return;
+    }
 
     state.model = model;
     state.trainHistory = historyLog;
     state.currentStep = 2;
 
-    // Compute per-class predictions for evaluation
-    const predictions = [];
-    for (let ci = 0; ci < state.classes.length; ci++) {
-        for (const sample of state.classes[ci].samples) {
-            const norm = normalizeFeatures(sample.features, normStats);
-            const pred = model.predict(tf.tensor2d([norm]));
-            const predArr = Array.from(pred.dataSync());
-            pred.dispose();
-            const predClass = predArr.indexOf(Math.max(...predArr));
-            predictions.push({ trueClass: ci, predClass, probs: predArr });
-        }
-    }
+    const predictionInput = tf.tensor2d(validationFeatures);
+    const predictionTensor = model.predict(predictionInput);
+    const probabilityRows = predictionTensor.arraySync();
+    predictionInput.dispose();
+    predictionTensor.dispose();
+    const predictions = probabilityRows.map((probs, index) => ({
+        trueClass: split.yTest[index],
+        predClass: probs.indexOf(Math.max(...probs)),
+        probs
+    }));
 
     state.predictions = predictions;
     state.classNames = classNames;
+    state.trainCount = trainFeatures.length;
+    state.validationCount = validationFeatures.length;
 
     showStep3(container, state);
 }
@@ -687,13 +774,13 @@ function showStep3(container, state) {
     const correct = predictions.filter(p => p.trueClass === p.predClass).length;
     const overallAcc = correct / predictions.length;
 
-    // Per-class accuracy
+    // Per-class recall (correct predictions among true samples of each class)
     const perClass = classNames.map((name, ci) => {
         const classP = predictions.filter(p => p.trueClass === ci);
         const classCorrect = classP.filter(p => p.predClass === ci).length;
         return {
             name,
-            accuracy: classP.length > 0 ? classCorrect / classP.length : 0,
+            recall: classP.length > 0 ? classCorrect / classP.length : null,
             total: classP.length,
             correct: classCorrect
         };
@@ -712,7 +799,7 @@ function showStep3(container, state) {
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
                         gap: 1rem; margin: 1.5rem 0;">
                 <div class="metric-card">
-                    <div class="metric-label">全体正解率</div>
+                    <div class="metric-label">検証正解率</div>
                     <div class="metric-value" style="color: ${ACCENT};">${(overallAcc * 100).toFixed(1)}%</div>
                 </div>
                 <div class="metric-card">
@@ -720,22 +807,27 @@ function showStep3(container, state) {
                     <div class="metric-value" style="color: ${ACCENT};">${numClasses}</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-label">サンプル数</div>
-                    <div class="metric-value" style="color: ${ACCENT};">${predictions.length}</div>
+                    <div class="metric-label">検証サンプル数</div>
+                    <div class="metric-value" style="color: ${ACCENT};">${state.validationCount}</div>
                 </div>
             </div>
+
+            <p style="color: var(--text-secondary); font-size: 0.85rem;">
+                クラスごとに分けた未学習の検証データで評価しています（訓練 ${state.trainCount}件、検証 ${state.validationCount}件、固定seed）。
+                件数が少ない場合、値は大きく変動します。
+            </p>
 
             <h4 style="margin: 1.5rem 0 0.75rem;"><i class="fas fa-chart-line"></i> 学習曲線</h4>
             <div id="ac-history-plot" style="width: 100%; height: 350px;"></div>
 
-            <h4 style="margin: 1.5rem 0 0.75rem;"><i class="fas fa-bullseye"></i> クラス別正解率</h4>
+            <h4 style="margin: 1.5rem 0 0.75rem;"><i class="fas fa-bullseye"></i> クラス別再現率</h4>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem;">
                 ${perClass.map(pc => `
                     <div style="background: ${ACCENT_LIGHT}; border-radius: 10px; padding: 0.75rem 1rem;
                                 border-left: 4px solid ${ACCENT};">
-                        <div style="font-weight: 600; color: ${ACCENT};">${pc.name}</div>
+                        <div style="font-weight: 600; color: ${ACCENT};">${escapeHtml(pc.name)}</div>
                         <div style="font-size: 1.25rem; font-weight: 700; margin-top: 0.25rem;">
-                            ${(pc.accuracy * 100).toFixed(1)}%
+                            ${pc.recall == null ? 'N/A' : `${(pc.recall * 100).toFixed(1)}%`}
                         </div>
                         <div style="font-size: 0.8rem; color: var(--text-secondary);">
                             ${pc.correct} / ${pc.total} 正解
@@ -760,16 +852,31 @@ function showStep3(container, state) {
             x: epochs,
             y: trainHistory.loss,
             mode: 'lines',
-            name: '損失 (Loss)',
+            name: '訓練損失',
             line: { color: '#ef4444', width: 2 }
+        },
+        {
+            x: epochs,
+            y: trainHistory.valLoss,
+            mode: 'lines',
+            name: '検証損失',
+            line: { color: '#f59e0b', width: 2, dash: 'dash' }
         },
         {
             x: epochs,
             y: trainHistory.acc,
             mode: 'lines',
-            name: '正解率 (Accuracy)',
+            name: '訓練正解率',
             yaxis: 'y2',
             line: { color: ACCENT, width: 2 }
+        },
+        {
+            x: epochs,
+            y: trainHistory.valAcc,
+            mode: 'lines',
+            name: '検証正解率',
+            yaxis: 'y2',
+            line: { color: '#2563eb', width: 2, dash: 'dash' }
         }
     ], {
         title: '学習履歴',
@@ -861,7 +968,7 @@ function showStep4(container, state) {
             await showPrediction(container, state, audioBuffer, blob);
         } catch (err) {
             indicator.style.display = 'none';
-            handleAudioError(err);
+            if (_activeState === state && err.name !== 'AbortError') handleAudioError(err);
         } finally {
             recordBtn.disabled = false;
         }
@@ -883,8 +990,10 @@ async function showPrediction(container, state, audioBuffer, blob) {
     const resultDiv = container.querySelector('#ac-pred-result');
     const features = extractAudioFeatures(audioBuffer);
     const norm = normalizeFeatures(features, state.normStats);
-    const predTensor = state.model.predict(tf.tensor2d([norm]));
+    const inputTensor = tf.tensor2d([norm]);
+    const predTensor = state.model.predict(inputTensor);
     const probs = Array.from(predTensor.dataSync());
+    inputTensor.dispose();
     predTensor.dispose();
 
     const maxIdx = probs.indexOf(Math.max(...probs));
@@ -899,10 +1008,10 @@ async function showPrediction(container, state, audioBuffer, blob) {
             <div style="text-align: center; margin-bottom: 1.5rem;">
                 <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.5rem;">予測結果</div>
                 <div style="font-size: 2rem; font-weight: 700; color: ${ACCENT};">
-                    ${predictedClass}
+                    ${escapeHtml(predictedClass)}
                 </div>
                 <div style="font-size: 1rem; color: var(--text-secondary); margin-top: 0.25rem;">
-                    信頼度: ${(confidence * 100).toFixed(1)}%
+                    予測スコア: ${(confidence * 100).toFixed(1)}%
                 </div>
             </div>
 
@@ -935,7 +1044,7 @@ async function showPrediction(container, state, audioBuffer, blob) {
         textposition: 'outside',
         hovertemplate: '%{y}: %{x:.1%}<extra></extra>'
     }], {
-        title: 'クラス別予測確率',
+        title: 'クラス別予測スコア（校正済み確率ではありません）',
         xaxis: { title: '確率', range: [0, 1.15], tickformat: '.0%' },
         yaxis: { automargin: true },
         height: 280,

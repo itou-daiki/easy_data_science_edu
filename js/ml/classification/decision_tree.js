@@ -4,6 +4,8 @@
  * @module classification/decision_tree
  */
 
+import { createSeededRandom, shuffleCopy } from '../random.js';
+
 /**
  * @class DecisionTreeClassifier
  */
@@ -14,12 +16,27 @@ export class DecisionTreeClassifier {
      * @param {number} [params.minSamplesSplit=2] - Minimum samples to split a node
      * @param {number} [params.minSamplesLeaf=1] - Minimum samples in a leaf
      * @param {string} [params.criterion='gini'] - Split criterion: 'gini' or 'entropy'
+     * @param {string|number|null} [params.maxFeatures=null] - Candidate features sampled at each split
+     * @param {number} [params.randomState=42] - Seed for feature sampling
+     * @param {number[]|null} [params.classes=null] - Optional fixed class order
      */
-    constructor({ maxDepth = 5, minSamplesSplit = 2, minSamplesLeaf = 1, criterion = 'gini' } = {}) {
+    constructor({
+        maxDepth = 5,
+        minSamplesSplit = 2,
+        minSamplesLeaf = 1,
+        criterion = 'gini',
+        maxFeatures = null,
+        randomState = 42,
+        classes = null
+    } = {}) {
         this.maxDepth = maxDepth;
         this.minSamplesSplit = minSamplesSplit;
         this.minSamplesLeaf = minSamplesLeaf;
         this.criterion = criterion;
+        this.maxFeatures = maxFeatures;
+        this.randomState = randomState;
+        this._fixedClasses = classes ? [...classes] : null;
+        this._rng = null;
         this.tree = null;
         this.classes = null;
         this.nFeatures = null;
@@ -97,7 +114,7 @@ export class DecisionTreeClassifier {
         let bestGain = 0;
         let bestSplit = null;
 
-        for (let f = 0; f < this.nFeatures; f++) {
+        for (const f of this._sampleFeatureIndices()) {
             const values = X.map(row => row[f]);
             const unique = [...new Set(values)].sort((a, b) => a - b);
 
@@ -131,6 +148,20 @@ export class DecisionTreeClassifier {
         }
 
         return bestSplit;
+    }
+
+    /** @private */
+    _sampleFeatureIndices() {
+        let count = this.nFeatures;
+        if (typeof this.maxFeatures === 'number') {
+            count = Math.min(this.nFeatures, Math.max(1, Math.floor(this.maxFeatures)));
+        } else if (this.maxFeatures === 'sqrt') {
+            count = Math.max(1, Math.floor(Math.sqrt(this.nFeatures)));
+        } else if (this.maxFeatures === 'log2') {
+            count = Math.max(1, Math.floor(Math.log2(this.nFeatures)));
+        }
+        const all = Array.from({ length: this.nFeatures }, (_, index) => index);
+        return count >= this.nFeatures ? all : shuffleCopy(all, this._rng).slice(0, count);
     }
 
     /** @private */
@@ -188,8 +219,11 @@ export class DecisionTreeClassifier {
         if (!X || !X.length || !y || !y.length) {
             throw new Error('X and y must be non-empty arrays');
         }
-        this.classes = [...new Set(y)].sort((a, b) => a - b);
+        this.classes = this._fixedClasses
+            ? [...this._fixedClasses]
+            : [...new Set(y)].sort((a, b) => a - b);
         this.nFeatures = X[0].length;
+        this._rng = createSeededRandom(this.randomState);
         this.featureImportances = new Array(this.nFeatures).fill(0);
         this.tree = this._buildTree(X, y, 0);
 
@@ -234,7 +268,9 @@ export class DecisionTreeClassifier {
             maxDepth: this.maxDepth,
             minSamplesSplit: this.minSamplesSplit,
             minSamplesLeaf: this.minSamplesLeaf,
-            criterion: this.criterion
+            criterion: this.criterion,
+            maxFeatures: this.maxFeatures,
+            randomState: this.randomState
         };
     }
 

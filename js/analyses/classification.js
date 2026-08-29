@@ -2,13 +2,13 @@
 // 分類モデル比較 (AutoML) Module
 // PyCaret-style: setup → compare_models (CV) → tune_model → predict_model
 // ==========================================
-import { createSelect, createStepIndicator, formatNumber, renderPlot, renderConfusionMatrix, renderROCCurve, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton, makeExportFileName, renderDataPreview, renderSummaryStatistics, downloadJSON, serializeModel, makeModelFileName } from '../utils.js';
+import { createSelect, createStepIndicator, escapeHtml, formatNumber, renderPlot, renderConfusionMatrix, renderROCCurve, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton, makeExportFileName, renderDataPreview, renderSummaryStatistics, downloadJSON, serializeModel, makeModelFileName } from '../utils.js';
 import { buildAnalysisContext, renderAIAssistPanel } from '../ai_assistant.js';
 import { buildAnalysisQualityReport, getAnalysisQualityNotes, renderAnalysisQualityPanel } from '../analysis_quality.js';
-import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
+import { kernelSHAP, shapSummary } from '../ml/shap.js';
 import { prepareTrainTestFeatures, prepareTrainValidationFeatures } from '../ml/preprocessing.js';
-import { StratifiedKFold, crossValidateWithPreprocessing, gridSearchWithPreprocessing, permutationImportance, learningCurve } from '../ml/model_selection.js';
-import { accuracy, precisionScore, recallScore, f1Score, confusionMatrix, logLoss, rocAucScore } from '../ml/metrics.js';
+import { StratifiedKFold, crossValidateWithPreprocessing, gridSearchWithPreprocessing, permutationImportance, learningCurveWithPreprocessing } from '../ml/model_selection.js';
+import { accuracy, precisionScore, recallScore, f1Score, confusionMatrix, logLoss, rocAucScore, multiclassRocAucScore, averagePrecisionScore, matthewsCorrelationCoefficient, bootstrapMetricInterval } from '../ml/metrics.js';
 import { LogisticRegression } from '../ml/classification/logistic.js';
 import { DecisionTreeClassifier } from '../ml/classification/decision_tree.js';
 import { RandomForestClassifier } from '../ml/classification/random_forest.js';
@@ -41,6 +41,59 @@ const STEPS = ['Setup', 'Preprocess', 'Compare', 'Create', 'Tune', 'Interpret', 
 // Module-level state for sharing data between steps
 let _state = {};
 
+function getSplitOptions() {
+    return {
+        splitStrategy: _state.splitStrategy || 'random',
+        splitColumn: _state.splitColumn || null,
+        splitGap: _state.splitGap || 0,
+    };
+}
+
+function getCvMethodLabel() {
+    if (_state.splitStrategy === 'group') return 'Group K-Fold（グループ非重複）';
+    if (_state.splitStrategy === 'time') return `時系列 expanding-window CV（gap=${_state.splitGap || 0}行）`;
+    return '層化K-Fold交差検証';
+}
+
+function validateAndAlignProbabilities(model, probabilities, classes) {
+    if (!Array.isArray(probabilities)) return null;
+    return probabilities.map((row, rowIndex) => {
+        if (!Array.isArray(row)) {
+            throw new Error(`確率予測の${rowIndex + 1}行目が配列ではありません。`);
+        }
+        const aligned = alignProbabilities(row, model?.classes, classes);
+        if (aligned.some(value => !Number.isFinite(value) || value < 0)) {
+            throw new Error(`確率予測の${rowIndex + 1}行目に無効な値があります。`);
+        }
+        const total = aligned.reduce((sum, value) => sum + value, 0);
+        if (!(total > 0)) {
+            throw new Error(`確率予測の${rowIndex + 1}行目の合計が0です。`);
+        }
+        return aligned.map(value => value / total);
+    });
+}
+
+function computeProbabilityMetrics(model, badge, yTrue, probabilities, classes, positiveClass = null) {
+    const aligned = validateAndAlignProbabilities(model, probabilities, classes);
+    if (!aligned) return { yProba: null, auc: null, ap: null, ll: null, positiveIndex: null };
+    const positiveIndex = classes.length === 2
+        ? Math.max(0, classes.indexOf(positiveClass ?? classes[1]))
+        : null;
+    const auc = classes.length === 2
+        ? rocAucScore(yTrue, aligned.map(row => row[positiveIndex]), classes[positiveIndex])
+        : multiclassRocAucScore(yTrue, aligned, classes, 'macro');
+    const ap = classes.length === 2
+        ? averagePrecisionScore(yTrue, aligned.map(row => row[positiveIndex]), classes[positiveIndex])
+        : null;
+    return {
+        yProba: aligned,
+        auc: Number.isFinite(auc) ? auc : null,
+        ap: Number.isFinite(ap) ? ap : null,
+        ll: badge === 'SVM' ? null : logLoss(yTrue, aligned, classes),
+        positiveIndex,
+    };
+}
+
 export function render(container, data, characteristics) {
     _state = {};
     const catCols = characteristics.categoricalColumns;
@@ -69,13 +122,20 @@ export function render(container, data, characteristics) {
 
         <div id="setup-section" class="model-config">
             <h3><i class="fas fa-cog"></i> Step 1: セットアップ</h3>
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.5rem; margin: 1.5rem 0;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1.5rem; margin: 1.5rem 0;">
                 <div>
                     <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">
                         目的変数（予測したいカテゴリ変数）:
                     </label>
                     ${createSelect('target-select', targetCandidates, '目的変数を選択')}
                     <p id="target-info" style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.5rem;"></p>
+                </div>
+                <div id="positive-class-wrapper" style="display: none;">
+                    <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">
+                        陽性クラス（PR/AP）:
+                    </label>
+                    <select id="positive-class-select" class="form-select"></select>
+                    <p style="color: var(--text-secondary); font-size: 0.8rem; margin-top: 0.4rem;">二値分類では少数クラスを初期選択します。</p>
                 </div>
                 <div>
                     <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">
@@ -86,6 +146,22 @@ export function render(container, data, characteristics) {
                         <option value="0.25">25%</option>
                         <option value="0.3" selected>30%</option>
                     </select>
+                </div>
+                <div>
+                    <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">データ分割方法:</label>
+                    <select id="split-strategy-select" class="form-select">
+                        <option value="random" selected>無作為層化（独立な行）</option>
+                        <option value="group">グループ非重複</option>
+                        <option value="time">時系列（未来をテスト）</option>
+                    </select>
+                </div>
+                <div id="split-column-wrapper" style="display: none;">
+                    <label id="split-column-label" style="font-weight: 600; display: block; margin-bottom: 0.5rem;">分割列:</label>
+                    <select id="split-column-select" class="form-select"></select>
+                </div>
+                <div id="split-gap-wrapper" style="display: none;">
+                    <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">時系列gap（行数）:</label>
+                    <input id="split-gap-input" type="number" class="form-select" min="0" max="1000" value="0" step="1">
                 </div>
                 <div>
                     <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">
@@ -100,7 +176,7 @@ export function render(container, data, characteristics) {
             </div>
             <div id="feature-selection" style="margin: 1rem 0; display: none;">
                 <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">
-                    使用する特徴量（数値変数のみ）:
+                    使用する特徴量（数値・カテゴリ変数）:
                 </label>
                 <div id="feature-chips" class="variable-chips"></div>
             </div>
@@ -128,6 +204,13 @@ export function render(container, data, characteristics) {
     const featureSelection = container.querySelector('#feature-selection');
     const featureChips = container.querySelector('#feature-chips');
     const targetInfo = container.querySelector('#target-info');
+    const positiveClassWrapper = container.querySelector('#positive-class-wrapper');
+    const positiveClassSelect = container.querySelector('#positive-class-select');
+    const splitStrategySelect = container.querySelector('#split-strategy-select');
+    const splitColumnWrapper = container.querySelector('#split-column-wrapper');
+    const splitColumnLabel = container.querySelector('#split-column-label');
+    const splitColumnSelect = container.querySelector('#split-column-select');
+    const splitGapWrapper = container.querySelector('#split-gap-wrapper');
 
     targetSelect.addEventListener('change', () => {
         const target = targetSelect.value;
@@ -135,24 +218,51 @@ export function render(container, data, characteristics) {
             featureSelection.style.display = 'none';
             btnCompare.disabled = true;
             targetInfo.innerHTML = '';
+            positiveClassWrapper.style.display = 'none';
             return;
         }
 
         const values = data.map(r => r[target]).filter(v => v != null);
         const unique = [...new Set(values)];
-        targetInfo.innerHTML = `クラス数: ${unique.length} (${unique.slice(0, 5).join(', ')}${unique.length > 5 ? '...' : ''})`;
+        targetInfo.textContent = `クラス数: ${unique.length} (${unique.slice(0, 5).join(', ')}${unique.length > 5 ? '...' : ''})`;
+        if (unique.length === 2) {
+            const counts = new Map(unique.map(value => [value, values.filter(item => item === value).length]));
+            const minority = [...unique].sort((a, b) => counts.get(a) - counts.get(b))[0];
+            positiveClassSelect.innerHTML = unique.map(value =>
+                `<option value="${_escapeHtml(String(value))}" ${value === minority ? 'selected' : ''} data-i18n-ignore>${_escapeHtml(String(value))}</option>`
+            ).join('');
+            positiveClassWrapper.style.display = 'block';
+        } else {
+            positiveClassSelect.innerHTML = '';
+            positiveClassWrapper.style.display = 'none';
+        }
 
-        const features = numCols.filter(c => c !== target);
+        const strategy = splitStrategySelect.value;
+        const previousSplitColumn = splitColumnSelect.value;
+        const splitCandidates = allCols.filter(column => column !== target);
+        if (strategy !== 'random') {
+            splitColumnSelect.innerHTML = splitCandidates.map(column =>
+                `<option value="${_escapeHtml(column)}" ${column === previousSplitColumn ? 'selected' : ''}>${_escapeHtml(column)}</option>`
+            ).join('');
+            splitColumnLabel.textContent = strategy === 'time' ? '時刻列:' : 'グループ列:';
+            splitColumnWrapper.style.display = 'block';
+            splitGapWrapper.style.display = strategy === 'time' ? 'block' : 'none';
+        } else {
+            splitColumnWrapper.style.display = 'none';
+            splitGapWrapper.style.display = 'none';
+        }
+        const splitColumn = strategy === 'random' ? null : splitColumnSelect.value;
+        const features = allCols.filter(c => c !== target && c !== splitColumn);
         if (features.length === 0) {
-            featureChips.innerHTML = '<p style="color: #ef4444;">数値特徴量がありません。数値変数を含むデータをお使いください。</p>';
+            featureChips.innerHTML = '<p style="color: #ef4444;">使用できる特徴量がありません。</p>';
             featureSelection.style.display = 'block';
             btnCompare.disabled = true;
             return;
         }
 
         featureChips.innerHTML = features.map(f =>
-            `<label class="variable-chip selected" data-value="${f}">
-                <input type="checkbox" value="${f}" checked style="display:none;"> <span data-i18n-ignore>${f}</span>
+            `<label class="variable-chip selected">
+                <input type="checkbox" value="${_escapeHtml(f)}" checked style="display:none;"> <span data-i18n-ignore>${_escapeHtml(f)}</span>
             </label>`
         ).join('');
 
@@ -167,6 +277,9 @@ export function render(container, data, characteristics) {
         featureSelection.style.display = 'block';
         btnCompare.disabled = false;
     });
+
+    splitStrategySelect.addEventListener('change', () => targetSelect.dispatchEvent(new Event('change')));
+    splitColumnSelect.addEventListener('change', () => targetSelect.dispatchEvent(new Event('change')));
 
     btnCompare.addEventListener('click', () => runComparison(container, data, characteristics));
 
@@ -190,6 +303,10 @@ async function runComparison(container, data, characteristics) {
     const targetCol = container.querySelector('#target-select').value;
     const testSize = parseFloat(container.querySelector('#test-size-select').value);
     const cvFolds = parseInt(container.querySelector('#cv-fold-select').value);
+    const selectedPositiveLabel = container.querySelector('#positive-class-select')?.value || null;
+    const splitStrategy = container.querySelector('#split-strategy-select').value;
+    const splitColumn = splitStrategy === 'random' ? null : container.querySelector('#split-column-select').value;
+    const splitGap = splitStrategy === 'time' ? parseInt(container.querySelector('#split-gap-input').value) || 0 : 0;
     const selectedFeatures = Array.from(container.querySelectorAll('#feature-chips input:checked')).map(cb => cb.value);
 
     if (selectedFeatures.length === 0) {
@@ -219,16 +336,33 @@ async function runComparison(container, data, characteristics) {
             selectedFeatures,
             task: 'classification',
             testSize,
-            randomState: 42
+            randomState: 42,
+            splitStrategy,
+            splitColumn,
+            splitGap,
         });
 
         const classes = [...new Set(yTrain)].sort((a, b) => a - b);
         const classLabels = labelEncoder ? classes.map(c => labelEncoder.inverseTransform([c])[0]) : classes.map(String);
+        const positiveClassIndex = classes.length === 2
+            ? Math.max(0, classLabels.findIndex(label => String(label) === String(selectedPositiveLabel)))
+            : null;
+        const positiveClass = positiveClassIndex == null ? null : classes[positiveClassIndex];
+        const positiveLabel = positiveClassIndex == null ? null : classLabels[positiveClassIndex];
 
         const minClassCount = Math.min(...classes.map(cls => yTrain.filter(v => v === cls).length));
-        const effectiveCvFolds = Math.min(cvFolds, minClassCount);
+        const maxStructureFolds = splitStrategy === 'group'
+            ? new Set(trainRows.map(row => row[splitColumn])).size
+            : Math.floor(XTrain.length / 2);
+        const effectiveCvFolds = splitStrategy === 'random'
+            ? Math.min(cvFolds, minClassCount)
+            : Math.min(cvFolds, maxStructureFolds);
         if (effectiveCvFolds < 2) {
-            throw new Error('分類の層化交差検証には、訓練データ内の各クラスが2件以上必要です。');
+            throw new Error(splitStrategy === 'group'
+                ? 'グループ交差検証には訓練データ内に2つ以上のグループが必要です。'
+                : splitStrategy === 'time'
+                    ? '時系列交差検証に使える訓練データが少なすぎます。'
+                    : '分類の層化交差検証には、訓練データ内の各クラスが2件以上必要です。');
         }
 
         // Save state for tune/predict
@@ -236,16 +370,22 @@ async function runComparison(container, data, characteristics) {
             XTrain, XTest, yTrain, yTest,
             featureNames, scaler, encoders, labelEncoder, preprocessor,
             classes, classLabels,
+            positiveClass, positiveLabel,
             cvFolds: effectiveCvFolds,
             requestedCvFolds: cvFolds,
             targetCol,
             selectedFeatures,
+            splitStrategy,
+            splitColumn,
+            splitGap,
             preprocessInfo,
             trainRows,
             testRows,
             fileName: characteristics.fileName || 'data',
             rawData: data,
-            characteristics
+            characteristics,
+            holdoutRevealed: false,
+            holdoutReused: false
         };
         _state.qualityReport = createClassificationQualityReport();
 
@@ -265,42 +405,42 @@ async function runComparison(container, data, characteristics) {
                 <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; color: #166534;">
                     <i class="fas fa-magic" style="margin-right: 0.5rem;"></i>Step 2: 前処理 (自動完了)
                 </h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1.5rem;">
-                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                <div class="preprocess-summary-grid">
+                    <div class="preprocess-summary-item">
                         <i class="fas fa-check-circle"></i>
-                        <span>目的変数: <strong data-i18n-ignore>${targetCol}</strong> (${classLabels.length}クラス)</span>
+                        <span>目的変数: <strong data-i18n-ignore>${_escapeHtml(targetCol)}</strong> (${classLabels.length}クラス)</span>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                    <div class="preprocess-summary-item">
                         <i class="fas fa-check-circle"></i>
                         <span>特徴量: <strong data-i18n-en="${featureNames.length}">${featureNames.length}個</strong></span>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                    <div class="preprocess-summary-item">
                         <i class="fas fa-check-circle"></i>
                         <span>欠損値処理: ${missingCount > 0 ? missingCount + '個を平均値で補完' : '欠損値なし'}</span>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                    <div class="preprocess-summary-item">
                         <i class="fas fa-check-circle"></i>
-                        <span>カテゴリ変数: ${categoricalCount > 0 ? categoricalCount + '列をLabel Encoding' : 'エンコード不要'}</span>
+                        <span>カテゴリ変数: ${categoricalCount > 0 ? categoricalCount + '列をOne-Hot Encoding' : 'エンコード不要'}</span>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                    <div class="preprocess-summary-item">
                         <i class="fas fa-check-circle"></i>
                         <span>外れ値除去: ${outlierRows > 0 ? outlierRows + '行をIQR法で除去' : '外れ値なし'}</span>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                    <div class="preprocess-summary-item">
                         <i class="fas fa-check-circle"></i>
-                        <span>特徴量変換: ${transformed.length > 0 ? transformed.join(', ') + ' にlog変換' : '変換不要'}</span>
+                        <span>特徴量変換: ${transformed.length > 0 ? _escapeHtml(transformed.join(', ')) + ' にlog変換' : '変換不要'}</span>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                    <div class="preprocess-summary-item">
                         <i class="fas fa-check-circle"></i>
-                        <span>多重共線性: ${removedMulti.length > 0 ? removedMulti.join(', ') + ' を除去' : '問題なし'}</span>
+                        <span>多重共線性: ${removedMulti.length > 0 ? _escapeHtml(removedMulti.join(', ')) + ' を除去' : '問題なし'}</span>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
+                    <div class="preprocess-summary-item">
                         <i class="fas fa-check-circle"></i>
                         <span>スケーリング: ${scalingApplied ? 'StandardScaler (平均0, 分散1)' : 'なし'}</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
                         <i class="fas fa-check-circle"></i>
-                        <span>データ分割: 訓練${XTrain.length}件 / テスト${XTest.length}件</span>
+                        <span>データ分割: 訓練${XTrain.length}件 / テスト${XTest.length}件（${getCvMethodLabel()}）${preprocessInfo.splitGapRows ? ` / gap除外${preprocessInfo.splitGapRows}件` : ''}</span>
                     </div>
                 </div>
             </div>
@@ -332,8 +472,6 @@ async function runComparison(container, data, characteristics) {
             try {
                 const model = new modelDef.cls(modelDef.params);
                 model.fit(XTrain, yTrain);
-                const yPred = model.predict(XTest);
-                const yProba = model.predictProba ? model.predictProba(XTest) : null;
 
                 // Cross-validation with preprocessing fitted inside each fold.
                 const cvScores = crossValidateWithPreprocessing(modelDef.cls, _state.trainRows, _state.targetCol, {
@@ -342,36 +480,22 @@ async function runComparison(container, data, characteristics) {
                     scoring: 'f1',
                     stratified: true,
                     task: 'classification',
-                    selectedFeatures: _state.selectedFeatures
+                    selectedFeatures: _state.selectedFeatures,
+                    ...getSplitOptions()
                 });
                 const cvMean = cvScores.reduce((a, b) => a + b, 0) / cvScores.length;
                 const cvStd = Math.sqrt(cvScores.reduce((a, v) => a + (v - cvMean) ** 2, 0) / cvScores.length);
-
-                const acc = accuracy(yTest, yPred);
-                const prec = precisionScore(yTest, yPred);
-                const rec = recallScore(yTest, yPred);
-                const f1 = f1Score(yTest, yPred);
-                const cmResult = confusionMatrix(yTest, yPred);
-                const cm = cmResult.matrix;
-                const baseline = computeClassificationBaseline(yTrain, yTest);
-
-                let auc = null;
-                let ll = null;
-                if (yProba && classes.length === 2) {
-                    const positiveProba = yProba.map(p => p[1] || 0);
-                    auc = rocAucScore(yTest, positiveProba, classes[1]);
-                    ll = logLoss(yTest, yProba, classes);
-                }
 
                 results.push({
                     name: modelDef.name,
                     badge: modelDef.badge,
                     cls: modelDef.cls,
                     model,
-                    acc, prec, rec, f1, cm, auc, ll,
-                    baseline,
+                    acc: null, prec: null, rec: null, f1: null, cm: null, auc: null, ll: null,
+                    baseline: null,
                     cvMean, cvStd, cvScores,
-                    yPred, yProba,
+                    yPred: null, yProba: null,
+                    holdoutEvaluated: false,
                     featureImportance: model.getFeatureImportance ? model.getFeatureImportance() : null
                 });
             } catch (err) {
@@ -395,7 +519,7 @@ async function runComparison(container, data, characteristics) {
 
         renderComparisonResults(container, results, yTest, featureNames, classes, classLabels);
     } catch (error) {
-        progressArea.innerHTML = `<p class="error-message"><i class="fas fa-exclamation-triangle"></i> エラー: ${error.message}</p>`;
+        progressArea.innerHTML = `<p class="error-message"><i class="fas fa-exclamation-triangle"></i> エラー: ${escapeHtml(error.message)}</p>`;
         console.error(error);
     }
 }
@@ -403,12 +527,11 @@ async function runComparison(container, data, characteristics) {
 function renderComparisonResults(container, results, yTest, featureNames, classes, classLabels) {
     const comparisonDiv = container.querySelector('#comparison-results');
     const bestCV = Math.max(...results.filter(r => r.model).map(r => r.cvMean));
-    const hasAuc = results.some(r => r.auc != null);
-
     let html = `
         <h3 style="margin-top: 1rem;"><i class="fas fa-trophy" style="color: #0891b2;"></i> モデル比較結果</h3>
         <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-            ${_state.cvFolds}-Fold 交差検証スコア（foldごとに前処理をfit、参考値）でソートしています。テストデータ (${yTest.length} サンプル) での評価結果も併記。
+            ${_state.cvFolds}-Fold ${getCvMethodLabel()}（foldごとに前処理をfit）のMacro F1平均でソートしています。fold間SDは信頼区間ではありません。
+            最終テスト ${yTest.length} 件はモデル選択が終わるまで未開封です。
         </p>
         <div class="table-container">
             <table class="table model-comparison-table">
@@ -416,13 +539,8 @@ function renderComparisonResults(container, results, yTest, featureNames, classe
                     <tr>
                         <th>順位</th>
                         <th>モデル</th>
-                        <th>CV F1 参考 (mean)</th>
-                        <th>CV F1 参考 (std)</th>
-                        <th>Test F1</th>
-                        <th>Accuracy</th>
-                        <th>Precision</th>
-                        <th>Recall</th>
-                        ${hasAuc ? '<th>AUC</th>' : ''}
+                        <th>CV Macro F1 (mean)</th>
+                        <th>fold間SD</th>
                         <th>詳細</th>
                     </tr>
                 </thead>
@@ -437,11 +555,6 @@ function renderComparisonResults(container, results, yTest, featureNames, classe
                             </td>
                             <td><strong>${r.model ? formatNumber(r.cvMean) : '-'}</strong></td>
                             <td>${r.model ? formatNumber(r.cvStd) : '-'}</td>
-                            <td>${r.model ? formatNumber(r.f1) : '-'}</td>
-                            <td>${r.model ? formatNumber(r.acc) : '<span style="color:#ef4444;">エラー</span>'}</td>
-                            <td>${r.model ? formatNumber(r.prec) : '-'}</td>
-                            <td>${r.model ? formatNumber(r.rec) : '-'}</td>
-                            ${hasAuc ? `<td>${r.auc != null ? formatNumber(r.auc) : '-'}</td>` : ''}
                             <td>${r.model ? `<button class="btn-detail" data-index="${i}" style="padding: 0.25rem 0.75rem; font-size: 0.85rem;">詳細</button>` : '-'}</td>
                         </tr>
                     `).join('')}
@@ -464,21 +577,15 @@ function renderComparisonResults(container, results, yTest, featureNames, classe
     const dlCompBtn = comparisonDiv.querySelector('#dl-comparison-csv');
     if (dlCompBtn) {
         dlCompBtn.addEventListener('click', () => {
-            const headers = ['順位', 'モデル', 'Badge', 'CV F1 参考 (mean)', 'CV F1 参考 (std)', 'Test F1', 'Accuracy', 'Precision', 'Recall'];
-            if (hasAuc) headers.push('AUC');
+            const headers = ['順位', 'モデル', 'Badge', 'CV Macro F1 (mean)', 'fold間SD'];
             const rows = results.map((r, i) => {
                 const row = [
                     r.model ? i + 1 : '-',
                     r.name,
                     r.badge,
                     r.model ? formatNumber(r.cvMean) : '-',
-                    r.model ? formatNumber(r.cvStd) : '-',
-                    r.model ? formatNumber(r.f1) : '-',
-                    r.model ? formatNumber(r.acc) : '-',
-                    r.model ? formatNumber(r.prec) : '-',
-                    r.model ? formatNumber(r.rec) : '-'
+                    r.model ? formatNumber(r.cvStd) : '-'
                 ];
-                if (hasAuc) row.push(r.auc != null ? formatNumber(r.auc) : '-');
                 return row;
             });
             const csv = toCSV(headers, rows);
@@ -506,52 +613,139 @@ function createClassificationQualityReport(result = null) {
         yTrain: _state.yTrain,
         yTest: _state.yTest,
         preprocessInfo: _state.preprocessInfo,
+        splitStrategy: _state.splitStrategy,
+        splitColumn: _state.splitColumn,
+        splitGap: _state.splitGap,
         result
     });
+}
+
+function evaluateClassificationHoldout(result) {
+    if (result.holdoutEvaluated) return;
+    const yPred = result.model.predict(_state.XTest);
+    const rawProba = result.model.predictProba ? result.model.predictProba(_state.XTest) : null;
+    const probabilityMetrics = computeProbabilityMetrics(
+        result.model, result.badge, _state.yTest, rawProba, _state.classes, _state.positiveClass
+    );
+    result.yPred = yPred;
+    result.yProba = probabilityMetrics.yProba;
+    result.acc = accuracy(_state.yTest, yPred);
+    result.prec = precisionScore(_state.yTest, yPred, 'macro');
+    result.rec = recallScore(_state.yTest, yPred, 'macro');
+    result.f1 = f1Score(_state.yTest, yPred, 'macro');
+    result.mcc = matthewsCorrelationCoefficient(_state.yTest, yPred);
+    result.cm = confusionMatrix(_state.yTest, yPred).matrix;
+    result.auc = probabilityMetrics.auc;
+    result.ap = probabilityMetrics.ap;
+    result.positiveIndex = probabilityMetrics.positiveIndex;
+    result.ll = probabilityMetrics.ll;
+    result.baseline = computeClassificationBaseline(_state.yTrain, _state.yTest);
+    result.intervals = {
+        accuracy: bootstrapMetricInterval(_state.yTest, yPred, accuracy, {
+            randomState: 42,
+            stratified: true
+        }),
+        f1: bootstrapMetricInterval(_state.yTest, yPred, (truth, prediction) => f1Score(truth, prediction, 'macro'), {
+            randomState: 43,
+            stratified: true
+        })
+    };
+    result.holdoutEvaluated = true;
+}
+
+function renderClassificationIntervals(result) {
+    const intervals = result.intervals || {};
+    const rows = [['Accuracy', intervals.accuracy], ['Macro F1', intervals.f1]].filter(([, interval]) => interval);
+    if (!rows.length) {
+        return '<p style="color: var(--text-secondary); font-size: 0.85rem;">標本数が少ないため、ブートストラップ区間は計算していません。</p>';
+    }
+    return `
+        <div class="table-container" style="margin-top: 1rem;">
+            <table class="table">
+                <thead><tr><th>指標</th><th>推定値</th><th>95% percentile bootstrap区間</th></tr></thead>
+                <tbody>${rows.map(([label, interval]) => `
+                    <tr><td>${label}</td><td>${formatNumber(interval.estimate)}</td><td>${formatNumber(interval.lower)} - ${formatNumber(interval.upper)}</td></tr>
+                `).join('')}</tbody>
+            </table>
+        </div>
+        <p style="color: var(--text-secondary); font-size: 0.82rem;">クラス別件数を保った再標本化による目安です。CVの信頼区間や将来データへの保証ではありません。</p>
+    `;
 }
 
 function showModelDetail(container, result, yTest, featureNames, classes, classLabels) {
     const evalSection = container.querySelector('#evaluate-section');
     evalSection.style.display = 'block';
+    const inputFeatureNames = _state.preprocessor?.inputFeatureNames || featureNames;
 
     container.querySelector('.step-indicator').outerHTML = createStepIndicator(STEPS, 3);
 
     const evalContent = container.querySelector('#evaluation-content');
     const hasTuneGrid = PARAM_GRIDS[result.badge] != null;
+    if (_state.holdoutRevealed) evaluateClassificationHoldout(result);
+    const holdoutMetrics = _state.holdoutRevealed ? `
+        ${createMetricCard('Test Accuracy', result.acc, '未使用テストデータの正解率')}
+        ${createMetricCard('Test Macro Precision', result.prec, 'クラス平均の適合率')}
+        ${createMetricCard('Test Macro Recall', result.rec, 'クラス平均の再現率')}
+        ${createMetricCard('Test Macro F1', result.f1, 'クラス平均F1')}
+        ${createMetricCard('MCC', result.mcc, '不均衡も考慮する相関係数（-1〜1）')}
+        ${result.auc != null ? createMetricCard(classes.length === 2 ? 'ROC AUC' : 'Macro OvR AUC', result.auc, classes.length === 2 ? 'ROC曲線下面積' : '各クラス対その他のAUC平均') : ''}
+        ${result.ap != null ? createMetricCard(`Average Precision`, result.ap, `陽性=${_escapeHtml(String(_state.positiveLabel))}、無情報基準=${formatNumber(_state.yTest.filter(value => value === _state.positiveClass).length / _state.yTest.length)}`) : ''}
+        ${result.ll != null ? createMetricCard('Log Loss', result.ll, '小さいほど確率予測が良い') : ''}
+    ` : '';
+    const holdoutPanel = _state.holdoutRevealed ? `
+        <div class="model-config" style="margin-top: 1.5rem;">
+            <h4><i class="fas fa-lock-open"></i> 最終テスト評価 (${yTest.length}件)</h4>
+            <p style="color: var(--text-secondary); font-size: 0.9rem;">
+                ${_state.holdoutReused
+                    ? '開示後にモデル調整を行ったため、以後のテスト指標は探索的な参考値です。新しい独立データで再評価してください。'
+                    : 'モデル選択に使わず一度だけ開示した保持データです。'}
+                ${result.badge === 'SVM' ? ' SVMの確率は未校正なのでLog Lossは表示していません。' : ''}
+            </p>
+            ${renderClassificationIntervals(result)}
+        </div>
+    ` : `
+        <div class="model-config" style="margin-top: 1.5rem; border-left: 4px solid #0891b2;">
+            <h4><i class="fas fa-lock"></i> 最終テストは未開封です</h4>
+            <p style="color: var(--text-secondary); font-size: 0.9rem;">
+                まずCV Macro F1だけでアルゴリズムとパラメータを決めてください。開示後に同じテストデータを見ながら調整すると、独立評価ではなくなります。
+            </p>
+            <button id="btn-reveal-holdout" class="btn-analysis" style="background: #0e7490;">
+                <i class="fas fa-lock-open"></i> このモデルで最終テストを開示
+            </button>
+        </div>
+    `;
 
     evalContent.innerHTML = `
         <h3><i class="fas fa-chart-bar" style="color: #0891b2;"></i> ${result.name} の詳細評価</h3>
 
         <div class="metrics-grid" style="margin: 1.5rem 0;">
-            ${createMetricCard('CV F1 参考', result.cvMean, `${_state.cvFolds}-Fold 前処理込みCV平均`)}
-            ${createMetricCard('CV F1 参考 std', result.cvStd, '前処理込みCVの標準偏差')}
-            ${createMetricCard('Accuracy', result.acc, '正解率')}
-            ${createMetricCard('Macro Precision', result.prec, 'クラス平均の適合率')}
-            ${createMetricCard('Macro Recall', result.rec, 'クラス平均の再現率')}
-            ${createMetricCard('Macro F1', result.f1, 'クラス平均F1スコア')}
-            ${result.auc != null ? createMetricCard('AUC', result.auc, 'ROC曲線下面積') : ''}
-            ${result.ll != null ? createMetricCard('Log Loss', result.ll, '小さいほど確率予測が良い') : ''}
+            ${createMetricCard('CV Macro F1', result.cvMean, `${_state.cvFolds}-Fold 前処理込みCV平均`)}
+            ${createMetricCard('fold間SD', result.cvStd, 'foldスコアの標準偏差（信頼区間ではない）')}
+            ${holdoutMetrics}
         </div>
 
-        ${renderClassificationPerformanceDiagnostics(result, yTest, classLabels)}
+        ${holdoutPanel}
+
+        ${_state.holdoutRevealed ? renderClassificationPerformanceDiagnostics(result, yTest, classLabels) : ''}
 
         ${renderAnalysisQualityPanel(createClassificationQualityReport(result), { title: '評価信頼性チェック', maxItems: 10 })}
 
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 2rem;">
+        ${_state.holdoutRevealed ? `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-top: 2rem;">
             <div id="confusion-matrix-plot"></div>
             ${result.auc != null ? '<div id="roc-curve-plot"></div>' : '<div></div>'}
-        </div>
+            ${result.ap != null ? '<div id="pr-curve-plot"></div>' : ''}
+        </div>` : ''}
 
         ${result.featureImportance ? '<div id="feature-importance-plot" style="margin-top: 2rem;"></div>' : ''}
 
         ${renderClassificationModelDiagnostics(result, featureNames, classLabels)}
 
-        <div style="margin-top: 2rem;">
+        ${_state.holdoutRevealed ? `<div style="margin-top: 2rem;">
             <h4>結果の解釈</h4>
             <div style="background: #f8fafc; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #0891b2; line-height: 1.8;">
                 ${interpretResults(result)}
             </div>
-        </div>
+        </div>` : ''}
 
         <!-- Create Model Section -->
         <div style="margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, #fef9c3, #fde68a); border-radius: 12px;">
@@ -601,7 +795,7 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
             <p style="color: #166534; margin: 0.5rem 0;">
                 Permutation Feature Importance、PDP、Learning Curve、SHAP でモデルを深く理解します。
             </p>
-            <button id="btn-interpret" class="btn-analysis" style="background: #16a34a; margin-top: 1rem;">
+            <button id="btn-interpret" class="btn-analysis" style="background: #16a34a; margin-top: 1rem;" ${_state.holdoutRevealed ? '' : 'disabled title="最終テスト開示後に利用できます"'}>
                 <i class="fas fa-microscope"></i> interpret_model を実行
             </button>
             <div id="interpret-results" style="margin-top: 1rem;"></div>
@@ -621,7 +815,7 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
                     <option value="7">全モデル (7)</option>
                 </select>
             </div>
-            <button id="btn-blend" class="btn-analysis" style="background: #7c3aed; margin-top: 0.5rem;">
+            <button id="btn-blend" class="btn-analysis" style="background: #7c3aed; margin-top: 0.5rem;" ${_state.holdoutRevealed ? '' : 'disabled title="現在の実装では最終テスト開示後の探索機能です"'}>
                 <i class="fas fa-blender"></i> blend_models を実行
             </button>
             <div id="blend-results" style="margin-top: 1rem;"></div>
@@ -641,7 +835,7 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
                     <option value="7">全モデル (7)</option>
                 </select>
             </div>
-            <button id="btn-stack" class="btn-analysis" style="background: #be185d; margin-top: 0.5rem;">
+            <button id="btn-stack" class="btn-analysis" style="background: #be185d; margin-top: 0.5rem;" ${_state.holdoutRevealed && _state.splitStrategy === 'random' ? '' : `disabled title="${_state.splitStrategy === 'random' ? '現在の実装では最終テスト開示後の探索機能です' : 'グループ・時系列分割ではOOF構築未対応のため利用できません'}"`}>
                 <i class="fas fa-object-group"></i> stack_models を実行
             </button>
             <div id="stack-results" style="margin-top: 1rem;"></div>
@@ -653,7 +847,7 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
             <p style="color: #991b1b; margin: 0.5rem 0;">
                 全データ（訓練+テスト）で再学習し、本番用モデルとして確定します。
             </p>
-            <button id="btn-finalize" class="btn-analysis" style="background: #dc2626; margin-top: 1rem;">
+            <button id="btn-finalize" class="btn-analysis" style="background: #dc2626; margin-top: 1rem;" ${_state.holdoutRevealed ? '' : 'disabled title="最終テスト評価後に確定してください"'}>
                 <i class="fas fa-flag-checkered"></i> finalize_model を実行
             </button>
             <div id="finalize-results" style="margin-top: 1rem;"></div>
@@ -666,7 +860,7 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
                 各特徴量の値を入力して予測を実行します。
             </p>
             <div id="predict-inputs" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; margin: 1rem 0;">
-                ${featureNames.map((f, i) => renderPredictInput(f, i)).join('')}
+                ${inputFeatureNames.map((f, i) => renderPredictInput(f, i)).join('')}
             </div>
             <button id="btn-predict" class="btn-analysis" style="background: #2563eb; margin-top: 0.5rem;">
                 <i class="fas fa-play"></i> predict_model を実行
@@ -675,17 +869,31 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
         </div>
     `;
 
-    if (result.cm) {
+    if (_state.holdoutRevealed && result.cm) {
         renderConfusionMatrix('confusion-matrix-plot', result.cm, classLabels);
     }
 
-    if (result.auc != null && result.yProba && classes.length === 2) {
-        const positiveProba = result.yProba.map(p => p[1] || 0);
-        renderROCCurve('roc-curve-plot', yTest, positiveProba, result.auc);
+    if (_state.holdoutRevealed && result.auc != null && result.yProba && classes.length === 2) {
+        const positiveIndex = result.positiveIndex ?? 1;
+        const positiveProba = result.yProba.map(p => p[positiveIndex] || 0);
+        const binaryTruth = yTest.map(value => value === _state.positiveClass ? 1 : 0);
+        renderROCCurve('roc-curve-plot', binaryTruth, positiveProba, result.auc);
+        if (result.ap != null) {
+            renderPrecisionRecallCurve('pr-curve-plot', binaryTruth, positiveProba, result.ap, _state.positiveLabel);
+        }
     }
 
     if (result.featureImportance && featureNames) {
         renderFeatureImportance('feature-importance-plot', featureNames, result.featureImportance);
+    }
+
+    const revealButton = container.querySelector('#btn-reveal-holdout');
+    if (revealButton) {
+        revealButton.addEventListener('click', () => {
+            _state.holdoutRevealed = true;
+            evaluateClassificationHoldout(result);
+            showModelDetail(container, result, yTest, featureNames, classes, classLabels);
+        });
     }
 
     // Create Model: populate param fields on model select change
@@ -729,7 +937,7 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
 
     // Predict button handler
     container.querySelector('#btn-predict').addEventListener('click', () => {
-        runPredictModel(container, result, featureNames);
+        runPredictModel(container, result, inputFeatureNames);
     });
 
     renderAIAssistPanel({
@@ -748,12 +956,15 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
                 features: featureNames,
                 cvF1Mean: result.cvMean,
                 cvF1Std: result.cvStd,
-                accuracy: result.acc,
-                precision: result.prec,
-                recall: result.rec,
-                f1: result.f1,
-                auc: result.auc,
-                logLoss: result.ll
+                holdoutStatus: _state.holdoutRevealed ? '開示済み' : '未開封',
+                ...(_state.holdoutRevealed ? {
+                    accuracy: result.acc,
+                    macroPrecision: result.prec,
+                    macroRecall: result.rec,
+                    macroF1: result.f1,
+                    auc: result.auc,
+                    logLoss: result.ll
+                } : {})
             },
             notes: getAnalysisQualityNotes(createClassificationQualityReport(result))
         })
@@ -813,24 +1024,16 @@ async function runCreateModel(container, featureNames, classes, classLabels) {
         const model = new modelDef.cls(mergedParams);
         model.fit(_state.XTrain, _state.yTrain);
 
-        const yPred = model.predict(_state.XTest);
-        const yProba = model.predictProba ? model.predictProba(_state.XTest) : null;
-
         const cvScores = crossValidateWithPreprocessing(modelDef.cls, _state.trainRows, _state.targetCol, {
             params: mergedParams,
             cv: _state.cvFolds,
             scoring: 'f1',
             stratified: true,
             task: 'classification',
-            selectedFeatures: _state.selectedFeatures
+            selectedFeatures: _state.selectedFeatures,
+            ...getSplitOptions()
         });
         const cvMean = cvScores.reduce((a, b) => a + b, 0) / cvScores.length;
-
-        const acc = accuracy(_state.yTest, yPred);
-        const prec = precisionScore(_state.yTest, yPred);
-        const rec = recallScore(_state.yTest, yPred);
-        const f1 = f1Score(_state.yTest, yPred);
-        const cm = confusionMatrix(_state.yTest, yPred).matrix;
 
         // Store created model in state
         _state.createdModel = model;
@@ -839,9 +1042,7 @@ async function runCreateModel(container, featureNames, classes, classLabels) {
             badge: modelDef.badge,
             cls: modelDef.cls,
             model,
-            acc, prec, rec, f1, cm,
             cvMean,
-            yPred, yProba,
             params: mergedParams
         };
 
@@ -853,22 +1054,18 @@ async function runCreateModel(container, featureNames, classes, classLabels) {
                 </p>
                 <div class="metrics-grid" style="margin: 1rem 0;">
                     ${createMetricCard('CV F1 参考', cvMean, `${_state.cvFolds}-Fold 前処理込みCV`)}
-                    ${createMetricCard('Accuracy', acc, '正解率')}
-                    ${createMetricCard('F1 Score', f1, 'F1スコア')}
-                    ${createMetricCard('Precision', prec, '適合率')}
-                    ${createMetricCard('Recall', rec, '再現率')}
                 </div>
-                <div id="create-model-cm-plot" style="margin-top: 1.5rem;"></div>
+                <p style="color: var(--text-secondary); font-size: 0.9rem;">保持テストはモデル作成・比較には使用していません。</p>
                 <p style="color: #166534; font-weight: 600; margin-top: 1rem;">
                     <i class="fas fa-info-circle"></i> 作成したモデルは predict_model で使用できます（finalize / stack / blend が未実行の場合）。
                 </p>
             </div>
         `;
 
-        renderConfusionMatrix('create-model-cm-plot', cm, classLabels);
+        if (_state.holdoutRevealed) _state.holdoutReused = true;
 
     } catch (error) {
-        createResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> モデル作成エラー: ${error.message}</p>`;
+        createResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> モデル作成エラー: ${escapeHtml(error.message)}</p>`;
         console.error('Create model error:', error);
     }
 
@@ -901,18 +1098,14 @@ async function runTuneModel(container, result, featureNames, classes, classLabel
                 scoring: 'f1',
                 stratified: true,
                 task: 'classification',
-                selectedFeatures: _state.selectedFeatures
+                selectedFeatures: _state.selectedFeatures,
+                ...getSplitOptions()
             }
         );
 
-        // Train best model on full training data and evaluate on test
+        // Train the CV-selected model on the full training partition.
         const tunedModel = new result.cls(bestParams);
         tunedModel.fit(_state.XTrain, _state.yTrain);
-        const yPredTuned = tunedModel.predict(_state.XTest);
-        const tunedF1 = f1Score(_state.yTest, yPredTuned);
-        const tunedAcc = accuracy(_state.yTest, yPredTuned);
-        const tunedPrec = precisionScore(_state.yTest, yPredTuned);
-        const tunedRec = recallScore(_state.yTest, yPredTuned);
 
         const improved = bestScore > result.cvMean;
 
@@ -935,38 +1128,6 @@ async function runTuneModel(container, result, featureNames, classes, classLabel
                                 <td>${formatNumber(bestScore)}</td>
                                 <td style="color: ${bestScore > result.cvMean ? '#10b981' : '#ef4444'};">
                                     ${bestScore > result.cvMean ? '+' : ''}${formatNumber(bestScore - result.cvMean)}
-                                </td>
-                            </tr>
-                            <tr>
-                                <td>Test F1</td>
-                                <td>${formatNumber(result.f1)}</td>
-                                <td>${formatNumber(tunedF1)}</td>
-                                <td style="color: ${tunedF1 > result.f1 ? '#10b981' : '#ef4444'};">
-                                    ${tunedF1 > result.f1 ? '+' : ''}${formatNumber(tunedF1 - result.f1)}
-                                </td>
-                            </tr>
-                            <tr>
-                                <td>Test Accuracy</td>
-                                <td>${formatNumber(result.acc)}</td>
-                                <td>${formatNumber(tunedAcc)}</td>
-                                <td style="color: ${tunedAcc > result.acc ? '#10b981' : '#ef4444'};">
-                                    ${tunedAcc > result.acc ? '+' : ''}${formatNumber(tunedAcc - result.acc)}
-                                </td>
-                            </tr>
-                            <tr>
-                                <td>Test Precision</td>
-                                <td>${formatNumber(result.prec)}</td>
-                                <td>${formatNumber(tunedPrec)}</td>
-                                <td style="color: ${tunedPrec > result.prec ? '#10b981' : '#ef4444'};">
-                                    ${tunedPrec > result.prec ? '+' : ''}${formatNumber(tunedPrec - result.prec)}
-                                </td>
-                            </tr>
-                            <tr>
-                                <td>Test Recall</td>
-                                <td>${formatNumber(result.rec)}</td>
-                                <td>${formatNumber(tunedRec)}</td>
-                                <td style="color: ${tunedRec > result.rec ? '#10b981' : '#ef4444'};">
-                                    ${tunedRec > result.rec ? '+' : ''}${formatNumber(tunedRec - result.rec)}
                                 </td>
                             </tr>
                         </tbody>
@@ -1007,26 +1168,27 @@ async function runTuneModel(container, result, featureNames, classes, classLabel
         // Update the model in result if improved
         if (improved) {
             result.model = tunedModel;
-            result.yPred = yPredTuned;
-            result.f1 = tunedF1;
-            result.acc = tunedAcc;
-            result.prec = tunedPrec;
-            result.rec = tunedRec;
             result.cvMean = bestScore;
             result.featureImportance = tunedModel.getFeatureImportance ? tunedModel.getFeatureImportance() : null;
-
-            // Recompute confusion matrix and proba
-            result.cm = confusionMatrix(_state.yTest, yPredTuned).matrix;
-            result.yProba = tunedModel.predictProba ? tunedModel.predictProba(_state.XTest) : null;
-            if (result.yProba && classes.length === 2) {
-                const positiveProba = result.yProba.map(p => p[1] || 0);
-                result.auc = rocAucScore(_state.yTest, positiveProba, classes[1]);
-                result.ll = logLoss(_state.yTest, result.yProba, classes);
+            result.holdoutEvaluated = false;
+            result.yPred = null;
+            result.yProba = null;
+            result.acc = null;
+            result.prec = null;
+            result.rec = null;
+            result.f1 = null;
+            result.cm = null;
+            result.auc = null;
+            result.ll = null;
+            result.intervals = null;
+            if (_state.holdoutRevealed) {
+                _state.holdoutReused = true;
+                evaluateClassificationHoldout(result);
             }
         }
 
     } catch (error) {
-        tuneResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> チューニングエラー: ${error.message}</p>`;
+        tuneResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> チューニングエラー: ${escapeHtml(error.message)}</p>`;
         console.error('Tune error:', error);
     }
 
@@ -1058,11 +1220,16 @@ async function runInterpretModel(container, result, featureNames) {
 
         // 2. PDP
         html += '<h4 style="margin-top: 2rem;"><i class="fas fa-chart-line" style="color: #16a34a;"></i> Partial Dependence Plot (PDP)</h4>';
-        html += '<p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 0.5rem;">各特徴量が予測確率にどう影響するかを可視化します。</p>';
+        html += '<p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 0.5rem;">PDPとSHAPは、選択した同じクラスのモデル出力を説明します。SVMの確率形式の値は校正済み確率ではありません。</p>';
+        html += '<div style="margin-bottom: 1rem;"><label for="interpret-class-select" style="font-weight: 600; margin-right: 0.5rem;">説明対象クラス:</label>';
+        html += `<select id="interpret-class-select" class="form-select" style="display: inline-block; width: auto;">
+            ${_state.classLabels.map((label, i) => `<option value="${i}" ${i === _state.classLabels.length - 1 ? 'selected' : ''} data-i18n-ignore>${escapeHtml(label)}</option>`).join('')}
+        </select></div>`;
         html += '<div style="margin-bottom: 1rem;"><label style="font-weight: 600; margin-right: 0.5rem;">特徴量を選択:</label>';
         html += `<select id="pdp-feature-select" class="form-select" style="display: inline-block; width: auto;">
-            ${featureNames.map((f, i) => `<option value="${i}" data-i18n-ignore>${f}</option>`).join('')}
+            ${featureNames.map((f, i) => `<option value="${i}" data-i18n-ignore>${escapeHtml(f)}</option>`).join('')}
         </select></div>`;
+        html += '<p id="pdp-target-note" style="color: var(--text-secondary); font-size: 0.85rem;"></p>';
         html += '<div id="pdp-plot"></div>';
 
         // 3. Learning Curve
@@ -1072,7 +1239,9 @@ async function runInterpretModel(container, result, featureNames) {
 
         // 4. SHAP Analysis
         html += '<h4 style="margin-top: 2rem;"><i class="fas fa-puzzle-piece" style="color: #16a34a;"></i> SHAP (SHapley Additive exPlanations)</h4>';
+        html += '<p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.75rem;">非線形モデルでは、訓練データを背景に固定seedの順列近似で局所的な寄与を計算します。予測値との加法整合性を保ちますが、相関した特徴量間の配分は背景データに依存します。</p>';
         html += '<p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">ゲーム理論に基づく各特徴量の貢献度を計算し、モデルの予測を説明します。</p>';
+        html += '<p id="shap-target-note" style="color: var(--text-secondary); font-size: 0.85rem;"></p>';
         html += '<div id="shap-summary-plot"></div>';
         html += '<div id="shap-beeswarm-plot" style="margin-top: 1.5rem;"></div>';
         html += '<div id="shap-waterfall-plot" style="margin-top: 1.5rem;"></div>';
@@ -1090,19 +1259,29 @@ async function runInterpretModel(container, result, featureNames) {
         );
         renderPermutationImportance('perm-importance-plot', featureNames, importancesMean, importancesStd);
 
+        const targetClassSelect = container.querySelector('#interpret-class-select');
+        const selectedTargetIndex = () => parseInt(targetClassSelect.value, 10);
+
         // Compute PDP for the first feature initially
-        computeAndRenderPDP(result.model, featureNames, 0);
+        computeAndRenderPDP(result.model, featureNames, 0, selectedTargetIndex());
 
         // PDP feature selector
         container.querySelector('#pdp-feature-select').addEventListener('change', (e) => {
-            computeAndRenderPDP(result.model, featureNames, parseInt(e.target.value));
+            computeAndRenderPDP(result.model, featureNames, parseInt(e.target.value, 10), selectedTargetIndex());
         });
 
         // Compute learning curve (using f1 scoring)
-        const lcResult = learningCurve(
+        const lcResult = learningCurveWithPreprocessing(
             result.cls, result.model.getParams ? result.model.getParams() : {},
-            _state.XTrain, _state.yTrain,
-            { cv: Math.min(_state.cvFolds, 3), scoring: 'f1', stratified: true }
+            _state.trainRows, _state.targetCol,
+            {
+                cv: Math.min(_state.cvFolds, 3),
+                scoring: 'f1',
+                stratified: true,
+                task: 'classification',
+                selectedFeatures: _state.selectedFeatures,
+                ...getSplitOptions()
+            }
         );
         renderLearningCurve(
             'learning-curve-plot',
@@ -1112,24 +1291,31 @@ async function runInterpretModel(container, result, featureNames) {
             'F1 Score'
         );
 
-        // Compute SHAP values
-        computeAndRenderSHAP(result, featureNames);
+        // Compute SHAP values for the same target class as PDP.
+        computeAndRenderSHAP(result, featureNames, selectedTargetIndex());
+        targetClassSelect.addEventListener('change', () => {
+            const featureIndex = parseInt(container.querySelector('#pdp-feature-select').value, 10);
+            computeAndRenderPDP(result.model, featureNames, featureIndex, selectedTargetIndex());
+            computeAndRenderSHAP(result, featureNames, selectedTargetIndex());
+        });
 
         // Generate interpretation analysis
         const analysisHtml = generateInterpretAnalysis(featureNames, importancesMean, lcResult);
         container.querySelector('#interpret-analysis').innerHTML = analysisHtml;
 
     } catch (error) {
-        interpretResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 解釈エラー: ${error.message}</p>`;
+        interpretResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 解釈エラー: ${escapeHtml(error.message)}</p>`;
         console.error('Interpret error:', error);
     }
 
     btnInterpret.disabled = false;
 }
 
-function computeAndRenderPDP(model, featureNames, featureIndex) {
+function computeAndRenderPDP(model, featureNames, featureIndex, targetClassIndex) {
     const X = _state.XTest;
     const nGrid = 30;
+    const targetClass = _state.classes[targetClassIndex];
+    const targetLabel = _state.classLabels[targetClassIndex];
 
     // Get range of the feature
     const featureValues = X.map(row => row[featureIndex]);
@@ -1147,10 +1333,8 @@ function computeAndRenderPDP(model, featureNames, featureIndex) {
                 newRow[featureIndex] = gridVal;
                 return newRow;
             });
-            const proba = model.predictProba(XModified);
-            // Use probability of class 1 (or the last class)
-            const classIdx = proba[0].length - 1;
-            return proba.reduce((sum, p) => sum + (p[classIdx] || 0), 0) / proba.length;
+            const proba = validateAndAlignProbabilities(model, model.predictProba(XModified), _state.classes);
+            return proba.reduce((sum, row) => sum + row[targetClassIndex], 0) / proba.length;
         });
     } else {
         pdpValues = gridValues.map(gridVal => {
@@ -1160,56 +1344,34 @@ function computeAndRenderPDP(model, featureNames, featureIndex) {
                 return newRow;
             });
             const preds = model.predict(XModified);
-            return preds.reduce((a, b) => a + b, 0) / preds.length;
+            return preds.filter(prediction => prediction === targetClass).length / preds.length;
         });
     }
 
+    const note = document.getElementById('pdp-target-note');
+    if (note) note.textContent = `PDPの説明対象: ${targetLabel}`;
     renderPDP('pdp-plot', featureNames[featureIndex], gridValues, pdpValues, '#16a34a');
 }
 
-function computeAndRenderSHAP(result, featureNames) {
+function computeAndRenderSHAP(result, featureNames, targetClassIndex) {
     const model = result.model;
     const XTest = _state.XTest;
     const XTrain = _state.XTrain;
-
-    // Compute feature means from training data
-    const nFeatures = featureNames.length;
-    const featureMeans = Array(nFeatures).fill(0);
-    for (const row of XTrain) {
-        for (let f = 0; f < nFeatures; f++) {
-            featureMeans[f] += row[f];
-        }
-    }
-    for (let f = 0; f < nFeatures; f++) {
-        featureMeans[f] /= XTrain.length;
-    }
-
+    const targetClass = _state.classes[targetClassIndex];
+    const targetLabel = _state.classLabels[targetClassIndex];
     let shapResult;
 
-    // Use linearSHAP for LogisticRegression (has coefficients), kernelSHAP otherwise
-    const isLogistic = model instanceof LogisticRegression;
-
-    if (isLogistic && model.weights && model.weights.length > 0) {
-        // For binary LogisticRegression, use linearSHAP with the weight vector
-        const w = model.weights[0];
-        const coefficients = w.slice(0, nFeatures);
-        const intercept = w[nFeatures] || 0;
-        shapResult = linearSHAP(coefficients, intercept, XTest, featureMeans);
-    } else if (model.predictProba) {
-        // Use probability of positive class as prediction function
+    if (model.predictProba) {
         const predictFn = (X) => {
-            const proba = model.predictProba(X);
-            return proba.map(p => p[1] || 0);
+            const proba = validateAndAlignProbabilities(model, model.predictProba(X), _state.classes);
+            return proba.map(row => row[targetClassIndex]);
         };
-        // Use a subset of background samples for efficiency
         const bgSample = XTrain.length > 50 ? XTrain.slice(0, 50) : XTrain;
         shapResult = kernelSHAP(predictFn, XTest, bgSample);
     } else {
-        // Map class labels to 0/1 for SHAP
-        const classes = _state.classes;
         const predictFn = (X) => {
             const preds = model.predict(X);
-            return preds.map(p => p === classes[classes.length - 1] ? 1 : 0);
+            return preds.map(prediction => prediction === targetClass ? 1 : 0);
         };
         const bgSample = XTrain.length > 50 ? XTrain.slice(0, 50) : XTrain;
         shapResult = kernelSHAP(predictFn, XTest, bgSample);
@@ -1217,6 +1379,8 @@ function computeAndRenderSHAP(result, featureNames) {
 
     const { shapValues, baseValue } = shapResult;
     const { meanAbsSHAP, meanSHAP } = shapSummary(shapValues);
+    const note = document.getElementById('shap-target-note');
+    if (note) note.textContent = `SHAPの説明対象: ${targetLabel}`;
 
     // 1. SHAP Summary Bar
     renderSHAPSummary('shap-summary-plot', featureNames, meanAbsSHAP, meanSHAP);
@@ -1261,24 +1425,10 @@ function generateInterpretAnalysis(featureNames, importancesMean, lcResult) {
 
     html += '</ul><p style="margin-top: 1rem;"><strong>学習曲線の分析:</strong></p><ul>';
 
-    if (gap > 0.15) {
-        html += `<li style="color: #ef4444;"><strong>過学習の兆候</strong>: 訓練スコア (${lastTrainScore.toFixed(3)}) と検証スコア (${lastTestScore.toFixed(3)}) の差が大きい (${gap.toFixed(3)})。正則化の強化やデータ追加を検討してください。</li>`;
-    } else if (gap > 0.05) {
-        html += `<li style="color: #f59e0b;">訓練スコアと検証スコアにやや差があります (gap=${gap.toFixed(3)})。軽度の過学習の可能性。</li>`;
-    } else {
-        html += `<li style="color: #10b981;">訓練スコアと検証スコアが近く (gap=${gap.toFixed(3)})、<strong>良好な汎化性能</strong>を示しています。</li>`;
-    }
-
-    if (lastTestScore < 0.5) {
-        html += '<li style="color: #ef4444;"><strong>未学習の兆候</strong>: 検証スコアが低いため、より複雑なモデルや特徴量エンジニアリングを検討してください。</li>';
-    }
-
     const earlyTestScore = lcResult.testScoresMean[0];
-    if (lastTestScore - earlyTestScore > 0.05) {
-        html += '<li>データ量の増加でスコアが向上しているため、<strong>追加データ収集が効果的</strong>と考えられます。</li>';
-    } else {
-        html += '<li>データ量増加による改善が小さいため、特徴量の改善やモデルの変更がより効果的です。</li>';
-    }
+    const scoreChange = lastTestScore - earlyTestScore;
+    html += `<li>最大データ量での訓練Macro F1は ${lastTrainScore.toFixed(3)}、検証Macro F1は ${lastTestScore.toFixed(3)}、差は ${gap.toFixed(3)} です。差だけで過学習を断定せず、各点のばらつきとクラス別結果を併せて確認してください。</li>`;
+    html += `<li>最小データ量から最大データ量までの検証Macro F1の変化は ${scoreChange >= 0 ? '+' : ''}${scoreChange.toFixed(3)} です。この範囲の曲線から、範囲外のデータ追加効果を保証することはできません。</li>`;
 
     html += '</ul></div>';
     return html;
@@ -1302,6 +1452,9 @@ async function runBlendModels(container, featureNames, classes, classLabels) {
         const topN = parseInt(container.querySelector('#blend-top-n').value);
         const validResults = _state.results.filter(r => r.model);
         const topModels = validResults.slice(0, topN);
+        if (!_state.holdoutRevealed) throw new Error('先に最終テストを開示してください。');
+        topModels.forEach(evaluateClassificationHoldout);
+        _state.holdoutReused = true;
 
         // For classification, use majority voting
         const blendedPred = _state.yTest.map((_, i) => {
@@ -1376,6 +1529,7 @@ async function runBlendModels(container, featureNames, classes, classLabels) {
                 <p style="color: var(--text-secondary); margin-bottom: 1rem;">
                     使用モデル: ${topModels.map(m => m.badge).join(', ')}
                 </p>
+                <p style="color: #0e7490; font-size: 0.9rem;">開示済みテストデータでアンサンブルを比較しているため、この結果は探索的な参考値です。</p>
                 <div class="table-container">
                     <table class="table">
                         <thead>
@@ -1434,7 +1588,7 @@ async function runBlendModels(container, featureNames, classes, classLabels) {
         renderConfusionMatrix('blend-cm-plot', blendedCM.matrix, classLabels);
 
     } catch (error) {
-        blendResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> ブレンドエラー: ${error.message}</p>`;
+        blendResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> ブレンドエラー: ${escapeHtml(error.message)}</p>`;
         console.error('Blend error:', error);
     }
 
@@ -1442,6 +1596,7 @@ async function runBlendModels(container, featureNames, classes, classLabels) {
 }
 
 async function runStackModels(container, featureNames, classes, classLabels) {
+    if (_state.splitStrategy !== 'random') return;
     const stackResults = container.querySelector('#stack-results');
     const btnStack = container.querySelector('#btn-stack');
     btnStack.disabled = true;
@@ -1459,6 +1614,9 @@ async function runStackModels(container, featureNames, classes, classLabels) {
         const topN = parseInt(container.querySelector('#stack-top-n').value);
         const validResults = _state.results.filter(r => r.model);
         const topModels = validResults.slice(0, topN);
+        if (!_state.holdoutRevealed) throw new Error('先に最終テストを開示してください。');
+        topModels.forEach(evaluateClassificationHoldout);
+        _state.holdoutReused = true;
 
         // Build out-of-fold stacked features so the meta learner never sees
         // in-sample base predictions.
@@ -1575,6 +1733,7 @@ async function runStackModels(container, featureNames, classes, classLabels) {
                 <p style="color: var(--text-secondary); margin-bottom: 1rem;">
                     ベースモデル: ${topModels.map(m => m.badge).join(', ')} / メタ学習器: LogisticRegression / foldごとに前処理をfitしたOut-of-Fold予測で学習
                 </p>
+                <p style="color: #0e7490; font-size: 0.9rem;">開示済みテストデータで構成を比較しているため、この結果は探索的な参考値です。</p>
                 <div class="table-container">
                     <table class="table">
                         <thead>
@@ -1633,7 +1792,7 @@ async function runStackModels(container, featureNames, classes, classLabels) {
         renderConfusionMatrix('stack-cm-plot', stackedCM.matrix, classLabels);
 
     } catch (error) {
-        stackResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> スタッキングエラー: ${error.message}</p>`;
+        stackResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> スタッキングエラー: ${escapeHtml(error.message)}</p>`;
         console.error('Stack error:', error);
     }
 
@@ -1669,7 +1828,8 @@ async function runFinalizeModel(container, result, featureNames) {
             selectedFeatures: _state.selectedFeatures,
             task: 'classification',
             testSize: 0,
-            randomState: 42
+            randomState: 42,
+            ...getSplitOptions()
         });
         const XFull = fullPrepared.XTrain;
         const yFull = fullPrepared.yTrain;
@@ -1693,17 +1853,6 @@ async function runFinalizeModel(container, result, featureNames) {
         _state.finalizedPreprocessInfo = fullPrepared.preprocessInfo;
         _state.isFinalized = true;
 
-        const cvScores = crossValidateWithPreprocessing(result.cls, _state.rawData, _state.targetCol, {
-            params,
-            cv: _state.cvFolds,
-            scoring: 'f1',
-            stratified: true,
-            task: 'classification',
-            selectedFeatures: _state.selectedFeatures
-        });
-        const cvMean = cvScores.reduce((a, b) => a + b, 0) / cvScores.length;
-        const cvStd = Math.sqrt(cvScores.reduce((a, v) => a + (v - cvMean) ** 2, 0) / cvScores.length);
-
         finalizeResults.innerHTML = `
             <div style="background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1rem;">
                 <h4><i class="fas fa-check-circle" style="color: #10b981;"></i> モデル確定完了</h4>
@@ -1712,14 +1861,12 @@ async function runFinalizeModel(container, result, featureNames) {
                 </p>
                 <div class="metrics-grid" style="margin: 1rem 0;">
                     ${createMetricCard('学習サンプル数', XFull.length, '訓練+テストの全データ')}
-                    ${createMetricCard('CV F1 参考', cvMean, `${_state.cvFolds}-Fold 全データ前処理込みCV参考`)}
-                    ${createMetricCard('CV F1 参考 std', cvStd, '全データ前処理込みCV参考の標準偏差')}
                 </div>
                 <div style="background: #f0fdf4; padding: 1rem; border-radius: 8px; border-left: 4px solid #10b981;">
                     <p style="color: #166534;">
                         <i class="fas fa-info-circle"></i>
                         これは本番用モデルです。前処理も全データでfitし直しており、predict_model では確定済みモデルと同じ前処理で予測を行います。
-                        テストデータがなくなるため、独立したテスト評価は行えません。CVスコアは参考値として扱ってください。
+                        この確定モデルは全データを学習に使ったため、独立した性能指標は表示しません。確定前に開示したテスト評価は、訓練データだけでfitした直前モデルの評価です。
                     </p>
                 </div>
                 ${createDownloadButton('dl-model-json', 'モデルをJSONダウンロード')}
@@ -1734,6 +1881,8 @@ async function runFinalizeModel(container, result, featureNames) {
                     { model: finalModel, name: result.name, badge: result.badge },
                     {
                         featureNames: _state.finalizedFeatureNames || _state.featureNames,
+                        inputFeatureNames: (_state.finalizedPreprocessor || _state.preprocessor)?.inputFeatureNames,
+                        pipelineSpec: (_state.finalizedPreprocessor || _state.preprocessor)?.pipelineSpec,
                         scaler: _state.finalizedScaler || _state.scaler,
                         encoders: _state.finalizedEncoders || _state.encoders,
                         labelEncoder: _state.finalizedLabelEncoder || _state.labelEncoder,
@@ -1748,7 +1897,7 @@ async function runFinalizeModel(container, result, featureNames) {
         }
 
     } catch (error) {
-        finalizeResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 確定エラー: ${error.message}</p>`;
+        finalizeResults.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 確定エラー: ${escapeHtml(error.message)}</p>`;
         console.error('Finalize error:', error);
     }
 
@@ -1856,9 +2005,9 @@ function runPredictModel(container, result, featureNames) {
                 <div style="margin-top: 1rem;">
                     <p style="font-weight: 600; margin-bottom: 0.5rem;">クラス別確率:</p>
                     ${activeClassLabels.map((label, i) => {
-                        const p = proba[0][i] || 0;
+                        const p = Math.max(0, Math.min(1, Number(proba[0][i]) || 0));
                         return `<div style="display: flex; align-items: center; margin: 0.25rem 0;">
-                            <span data-i18n-ignore style="width: 80px; font-size: 0.85rem;">${label}</span>
+                            <span data-i18n-ignore style="width: 80px; font-size: 0.85rem;">${_escapeHtml(label)}</span>
                             <div style="flex: 1; background: #e2e8f0; border-radius: 4px; height: 20px; margin: 0 0.5rem;">
                                 <div style="width: ${(p * 100).toFixed(1)}%; background: #0891b2; border-radius: 4px; height: 100%;"></div>
                             </div>
@@ -1871,12 +2020,12 @@ function runPredictModel(container, result, featureNames) {
 
         predictResult.innerHTML = `
             <div style="background: white; padding: 1.5rem; border-radius: 8px; text-align: center;">
-                <p style="font-size: 0.9rem; color: var(--text-secondary);">予測結果 (${modelLabel})</p>
+                <p style="font-size: 0.9rem; color: var(--text-secondary);">予測結果 (${_escapeHtml(modelLabel)})</p>
                 <p style="font-size: 2.5rem; font-weight: 700; color: #0891b2; margin: 0.5rem 0;">
-                    ${predictedLabel}
+                    ${_escapeHtml(predictedLabel)}
                 </p>
                 <p style="font-size: 0.85rem; color: var(--text-secondary);">
-                    目的変数: ${_state.targetCol}
+                    目的変数: ${_escapeHtml(_state.targetCol)}
                 </p>
                 ${probaHtml}
             </div>
@@ -1902,7 +2051,7 @@ function runPredictModel(container, result, featureNames) {
             });
         }
     } catch (error) {
-        predictResult.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 予測エラー: ${error.message}</p>`;
+        predictResult.innerHTML = `<p style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> 予測エラー: ${escapeHtml(error.message)}</p>`;
         console.error('Predict error:', error);
     }
 }
@@ -1929,6 +2078,51 @@ function computeClassificationBaseline(yTrain, yTest) {
     };
 }
 
+function renderPrecisionRecallCurve(containerId, yTrue, scores, averagePrecision, positiveLabel) {
+    const ranked = yTrue.map((label, index) => ({ label, score: scores[index] }))
+        .sort((a, b) => b.score - a.score);
+    const totalPositive = yTrue.filter(value => value === 1).length;
+    const prevalence = totalPositive / yTrue.length;
+    let truePositive = 0;
+    let falsePositive = 0;
+    const recall = [0];
+    const precision = [1];
+
+    for (let start = 0; start < ranked.length;) {
+        let end = start;
+        while (end < ranked.length && ranked[end].score === ranked[start].score) {
+            if (ranked[end].label === 1) truePositive++;
+            else falsePositive++;
+            end++;
+        }
+        recall.push(totalPositive > 0 ? truePositive / totalPositive : 0);
+        precision.push(truePositive / (truePositive + falsePositive));
+        start = end;
+    }
+
+    renderPlot(containerId, [
+        {
+            x: recall,
+            y: precision,
+            mode: 'lines+markers',
+            name: `PR (AP=${formatNumber(averagePrecision)})`,
+            line: { color: '#0891b2', width: 2 },
+            marker: { size: 4 },
+        },
+        {
+            x: [0, 1],
+            y: [prevalence, prevalence],
+            mode: 'lines',
+            name: `無情報基準 (${formatNumber(prevalence)})`,
+            line: { color: '#94a3b8', dash: 'dash' },
+        }
+    ], {
+        title: `Precision-Recall（陽性: ${_escapeHtml(String(positiveLabel))}）`,
+        xaxis: { title: 'Recall', range: [0, 1] },
+        yaxis: { title: 'Precision', range: [0, 1] },
+    });
+}
+
 function renderClassificationPerformanceDiagnostics(result, yTest, classLabels) {
     const baseline = result.baseline;
     const perClassRows = computePerClassRows(result.cm, classLabels);
@@ -1952,6 +2146,8 @@ function renderClassificationPerformanceDiagnostics(result, yTest, classLabels) 
                         <tr><td>Macro Precision</td><td>${formatNumber(result.prec)}</td><td>${formatNumber(baseline?.prec)}</td><td>${formatSigned(result.prec - (baseline?.prec ?? 0))}</td><td>予測したクラスがどれだけ当たるかのクラス平均。</td></tr>
                         <tr><td>Macro Recall</td><td>${formatNumber(result.rec)}</td><td>${formatNumber(baseline?.rec)}</td><td>${formatSigned(result.rec - (baseline?.rec ?? 0))}</td><td>各クラスをどれだけ取りこぼさないかのクラス平均。</td></tr>
                         <tr><td>Macro F1</td><td>${formatNumber(result.f1)}</td><td>${formatNumber(baseline?.f1)}</td><td>${formatSigned(result.f1 - (baseline?.f1 ?? 0))}</td><td>PrecisionとRecallのバランス。比較の主指標。</td></tr>
+                        <tr><td>MCC</td><td>${formatNumber(result.mcc)}</td><td>-</td><td>-</td><td>-1〜1の相関係数。クラス不均衡下でも全セルを使って評価。</td></tr>
+                        ${result.ap != null ? `<tr><td>Average Precision</td><td>${formatNumber(result.ap)}</td><td>${formatNumber(yTest.filter(value => value === _state.positiveClass).length / yTest.length)}</td><td>${formatSigned(result.ap - yTest.filter(value => value === _state.positiveClass).length / yTest.length)}</td><td>陽性=${_escapeHtml(String(_state.positiveLabel))}。PR曲線をしきい値横断で要約。</td></tr>` : ''}
                     </tbody>
                 </table>
             </div>
@@ -1963,12 +2159,12 @@ function renderClassificationPerformanceDiagnostics(result, yTest, classLabels) 
                     <tbody>
                         ${perClassRows.map((row, idx) => `
                             <tr>
-                                <td><strong data-i18n-ignore>${row.label}</strong></td>
+                                <td><strong data-i18n-ignore>${_escapeHtml(row.label)}</strong></td>
                                 <td>${testCounts[idx]?.count ?? 0}</td>
                                 <td>${formatNumber(row.precision)}</td>
                                 <td>${formatNumber(row.recall)}</td>
                                 <td>${formatNumber(row.f1)}</td>
-                                <td>${row.recall < 0.5 ? '取りこぼしに注意' : row.precision < 0.5 ? '誤検出に注意' : '概ね安定'}</td>
+                                <td>件数と誤分類コストを踏まえて比較</td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -1987,7 +2183,7 @@ function renderClassificationModelDiagnostics(result, featureNames, classLabels)
         const isSvm = badge === 'SVM';
         const rows = createWeightRows(model.weights || [], featureNames, classLabels);
         const targetText = classLabels.length === 2
-            ? `${classLabels[classLabels.length - 1]} 方向`
+            ? `${_escapeHtml(classLabels[classLabels.length - 1])} 方向`
             : 'One-vs-Restの平均絶対値';
 
         return `
@@ -1997,7 +2193,7 @@ function renderClassificationModelDiagnostics(result, featureNames, classLabels)
                     ${isSvm
                         ? 'SVMに表示される値は分類境界のマージン重みです。確率はsigmoid近似で未キャリブレーションのため、確率値やLog Lossは参考扱いにしてください。'
                         : 'ロジスティック回帰の係数は標準化後特徴量に対するlog-oddsの変化です。符号はクラス方向、絶対値は影響の目安です。'}
-                    Label Encodingされたカテゴリ特徴量の係数はカテゴリ順序を意味しないため、強く解釈しないでください。
+                    カテゴリ特徴量は「列名=カテゴリ」のOne-Hot列として表示されます。基準・相関・正則化によって重みが変わるため、単独で因果効果とは解釈しないでください。
                 </p>
                 <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 1rem;">表示方向: ${targetText}</p>
                 ${renderWeightTable(rows, isSvm)}
@@ -2115,10 +2311,10 @@ function renderWeightTable(rows, isSvm) {
                 <tbody>
                     ${rows.map(row => `
                         <tr>
-                            <td><strong data-i18n-ignore>${row.name}</strong></td>
+                            <td><strong data-i18n-ignore>${_escapeHtml(row.name)}</strong></td>
                             <td>${formatNumber(row.value)}</td>
                             <td>${formatNumber(row.abs)}</td>
-                            <td>${row.direction}</td>
+                            <td>${_escapeHtml(row.direction)}</td>
                         </tr>
                     `).join('')}
                 </tbody>
@@ -2141,7 +2337,7 @@ function renderImportanceTable(featureNames, importances) {
                 <tbody>
                     ${rows.map(row => `
                         <tr>
-                            <td><strong data-i18n-ignore>${row.name}</strong></td>
+                            <td><strong data-i18n-ignore>${_escapeHtml(row.name)}</strong></td>
                             <td>${formatNumber(row.importance)}</td>
                             <td>大きいほど分類に使われた度合いが高い</td>
                         </tr>
@@ -2159,7 +2355,7 @@ function renderParameterTable(params) {
             <table class="table">
                 <thead><tr><th>項目</th><th>値</th></tr></thead>
                 <tbody>
-                    ${params.map(([label, value]) => `<tr><td>${label}</td><td>${value}</td></tr>`).join('')}
+                    ${params.map(([label, value]) => `<tr><td>${_escapeHtml(label)}</td><td>${_escapeHtml(value)}</td></tr>`).join('')}
                 </tbody>
             </table>
         </div>
@@ -2172,37 +2368,25 @@ function formatSigned(value) {
 }
 
 function interpretResults(result) {
-    const f1 = result.f1;
-    let interpretation = `<p><strong>${result.name}</strong> の評価結果:</p><ul>`;
-
-    if (f1 >= 0.9) {
-        interpretation += `<li>F1 = ${formatNumber(f1)} : <strong style="color: #10b981;">非常に高い分類精度</strong>です。</li>`;
-    } else if (f1 >= 0.7) {
-        interpretation += `<li>F1 = ${formatNumber(f1)} : <strong style="color: #3b82f6;">良好な分類精度</strong>です。</li>`;
-    } else if (f1 >= 0.5) {
-        interpretation += `<li>F1 = ${formatNumber(f1)} : <strong style="color: #f59e0b;">中程度の分類精度</strong>です。特徴量の改善を検討してください。</li>`;
-    } else {
-        interpretation += `<li>F1 = ${formatNumber(f1)} : <strong style="color: #ef4444;">分類精度が低い</strong>です。データやモデルの見直しが必要です。</li>`;
-    }
-
-    // CV interpretation
-    interpretation += `<li>CV F1 = ${formatNumber(result.cvMean)} ± ${formatNumber(result.cvStd)} : `;
-    if (Math.abs(result.cvMean - result.f1) < 0.1) {
-        interpretation += `交差検証とテストの差が小さく、<strong style="color: #10b981;">安定したモデル</strong>です。</li>`;
-    } else if (result.cvMean > result.f1) {
-        interpretation += `CVがテストF1より高く、<strong style="color: #f59e0b;">テストデータにやや弱い</strong>可能性があります。</li>`;
-    } else {
-        interpretation += `CVよりテストF1が高い結果です。</li>`;
-    }
-
-    interpretation += `<li>Accuracy = ${formatNumber(result.acc)} : 全体の ${(result.acc * 100).toFixed(1)}% を正しく分類できました。</li>`;
-    interpretation += `<li>Precision = ${formatNumber(result.prec)} : 正と予測したものの ${(result.prec * 100).toFixed(1)}% が実際に正でした。</li>`;
-    interpretation += `<li>Recall = ${formatNumber(result.rec)} : 実際に正のものの ${(result.rec * 100).toFixed(1)}% を検出できました。</li>`;
+    let interpretation = `<p><strong>${_escapeHtml(result.name)}</strong> の評価結果:</p><ul>`;
+    interpretation += `<li>Test Macro F1 = ${formatNumber(result.f1)} です。各クラスのF1を同じ重みで平均するため、クラス数・件数・誤分類コストとクラス別指標を併読してください。</li>`;
+    interpretation += `<li>CV Macro F1 = ${formatNumber(result.cvMean)}、fold間SD = ${formatNumber(result.cvStd)} です。SDは信頼区間ではなく、分割による変動の目安です。</li>`;
+    interpretation += `<li>Accuracy = ${formatNumber(result.acc)}、Macro Precision = ${formatNumber(result.prec)}、Macro Recall = ${formatNumber(result.rec)} です。不均衡データではAccuracyだけで判断しないでください。</li>`;
 
     if (result.auc != null) {
-        interpretation += `<li>AUC = ${formatNumber(result.auc)} : ROC曲線下面積で、1.0に近いほどランダムより優れた分類です。</li>`;
+        interpretation += `<li>ROC AUC = ${formatNumber(result.auc)} です。順位付けの識別能力を表しますが、確率の校正や特定しきい値での有用性は示しません。</li>`;
     }
+    if (result.ap != null) {
+        interpretation += `<li>陽性「${_escapeHtml(String(_state.positiveLabel))}」のAverage Precision = ${formatNumber(result.ap)}、陽性率基準 = ${formatNumber(_state.yTest.filter(value => value === _state.positiveClass).length / _state.yTest.length)} です。PR曲線でPrecisionとRecallの関係も確認してください。</li>`;
+    }
+    interpretation += `<li>MCC = ${formatNumber(result.mcc)} です。全クラスの混同行列を使う-1〜1の指標で、0付近は偶然水準に近い対応を示します。</li>`;
 
+    interpretation += _state.splitStrategy === 'group'
+        ? `<li>グループ列「${_escapeHtml(_state.splitColumn)}」が分割をまたがない評価です。未知グループへの一般化を表し、foldごとのクラス件数も確認してください。</li>`
+        : _state.splitStrategy === 'time'
+            ? `<li>時刻列「${_escapeHtml(_state.splitColumn)}」で過去から未来へ分割し、gapを${_state.splitGap || 0}行設けています。時期ごとのクラス比率変化にも注意してください。</li>`
+            : '<li>無作為層化分割は、行が独立同分布で将来データも同じ分布に従うという前提を置きます。同一対象の反復測定や時系列ではセットアップで専用分割を選んでください。</li>';
+    interpretation += '<li>予測性能や特徴量重要度は因果効果を示しません。介入や因果関係の結論には別の研究設計が必要です。</li>';
     interpretation += `</ul>`;
     return interpretation;
 }

@@ -2,7 +2,9 @@
 // 画像分類 (Image Classification) Module
 // Transfer Learning with MobileNet + TensorFlow.js
 // ==========================================
-import { createStepIndicator, formatNumber, renderPlot, renderConfusionMatrix } from '../utils.js';
+import { createStepIndicator, escapeHtml, formatNumber, renderPlot, renderConfusionMatrix } from '../utils.js';
+import { trainTestSplit } from '../ml/model_selection.js';
+import { createSeededRandom } from '../ml/random.js';
 
 const STEPS = ['データ準備', '学習', '評価', '予測'];
 const THEME_COLOR = '#059669';
@@ -10,6 +12,9 @@ const THEME_COLOR_LIGHT = 'rgba(5, 150, 105, 0.08)';
 const THEME_COLOR_BORDER = 'rgba(5, 150, 105, 0.3)';
 const IMAGE_SIZE = 224;
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const MAX_IMAGE_FILE_BYTES = 15 * 1024 * 1024;
+const MAX_IMAGES_PER_CLASS = 200;
+let _activeCleanup = null;
 
 // ==========================================
 // TensorFlow.js Access
@@ -57,7 +62,7 @@ function imageToTensor(img) {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(img, 0, 0, IMAGE_SIZE, IMAGE_SIZE);
     const imageData = ctx.getImageData(0, 0, IMAGE_SIZE, IMAGE_SIZE);
-    return tfLib.browser.fromPixels(imageData).toFloat().div(255.0);
+    return tfLib.tidy(() => tfLib.browser.fromPixels(imageData).toFloat().div(255.0));
 }
 
 function createThumbnail(file) {
@@ -70,7 +75,20 @@ function createThumbnail(file) {
 }
 
 function isValidImageFile(file) {
-    return ACCEPTED_TYPES.includes(file.type);
+    return ACCEPTED_TYPES.includes(file.type) && file.size <= MAX_IMAGE_FILE_BYTES;
+}
+
+function validateImageBatch(files, currentCount = 0) {
+    if (files.length === 0 || files.some(file => !ACCEPTED_TYPES.includes(file.type))) {
+        throw new Error('対応する画像形式（JPG, PNG, WEBP）のみアップロードできます。');
+    }
+    if (files.some(file => file.size > MAX_IMAGE_FILE_BYTES)) {
+        throw new Error('画像1枚あたりの上限は15 MiBです。');
+    }
+    if (currentCount + files.length > MAX_IMAGES_PER_CLASS) {
+        throw new Error(`1クラスあたり最大${MAX_IMAGES_PER_CLASS}枚まで追加できます。`);
+    }
+    return files;
 }
 
 // ==========================================
@@ -80,11 +98,15 @@ function isValidImageFile(file) {
 async function extractFeatures(mobileNetModel, images) {
     const tfLib = getTf();
     const embeddings = [];
-    for (const img of images) {
-        const embedding = mobileNetModel.infer(img, true);
-        embeddings.push(embedding);
+    try {
+        for (const img of images) {
+            const embedding = mobileNetModel.infer(img, true);
+            embeddings.push(embedding);
+        }
+        return tfLib.concat(embeddings, 0);
+    } finally {
+        embeddings.forEach(embedding => embedding.dispose());
     }
-    return tfLib.concat(embeddings, 0);
 }
 
 // ==========================================
@@ -178,7 +200,7 @@ function showError(container, message) {
         errorEl.innerHTML = `
             <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;
                         padding: 1rem; margin: 1rem 0; color: #dc2626;">
-                <i class="fas fa-exclamation-triangle"></i> ${message}
+                <i class="fas fa-exclamation-triangle"></i> ${escapeHtml(message)}
             </div>`;
         setTimeout(() => { errorEl.innerHTML = ''; }, 8000);
     }
@@ -190,7 +212,7 @@ function showSuccess(container, message) {
         errorEl.innerHTML = `
             <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px;
                         padding: 1rem; margin: 1rem 0; color: #16a34a;">
-                <i class="fas fa-check-circle"></i> ${message}
+                <i class="fas fa-check-circle"></i> ${escapeHtml(message)}
             </div>`;
         setTimeout(() => { errorEl.innerHTML = ''; }, 5000);
     }
@@ -206,8 +228,9 @@ function createClassCard(classData, classIndex) {
             <div style="position: relative; display: inline-block;">
                 <img src="${thumb}" style="width: 48px; height: 48px; object-fit: cover;
                      border-radius: 6px; border: 1px solid var(--border-color);"
-                     alt="${classData.name} - ${i + 1}">
+                     alt="${escapeHtml(classData.name)} - ${i + 1}">
                 <button class="ic-remove-image" data-class="${classIndex}" data-image="${i}"
+                        aria-label="${escapeHtml(classData.name)}の画像${i + 1}を削除"
                         style="position: absolute; top: -4px; right: -4px; width: 16px; height: 16px;
                                background: #ef4444; color: white; border: none; border-radius: 50%;
                                font-size: 10px; cursor: pointer; display: flex; align-items: center;
@@ -221,23 +244,23 @@ function createClassCard(classData, classIndex) {
         <div class="ic-class-card" data-class-index="${classIndex}"
              style="background: var(--surface); border: 1px solid var(--border-color);
                     border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-                <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 0.75rem;">
+                <div style="display: flex; align-items: center; gap: 0.75rem; min-width: 0; flex: 1;">
                     <div style="width: 32px; height: 32px; background: ${THEME_COLOR_LIGHT};
                                 border-radius: 8px; display: flex; align-items: center;
                                 justify-content: center; color: ${THEME_COLOR}; font-weight: 700; font-size: 0.85rem;">
                         ${classIndex + 1}
                     </div>
                     <input type="text" class="ic-class-name" data-class="${classIndex}"${translatedValue}
-                           value="${classData.name}" placeholder="クラス名を入力"
+                           value="${escapeHtml(classData.name)}" placeholder="クラス名を入力"
                            style="border: 1px solid var(--border-color); border-radius: 6px;
-                                  padding: 0.4rem 0.75rem; font-size: 0.9rem; width: 180px;">
+                                  padding: 0.4rem 0.75rem; font-size: 0.9rem; width: 180px; max-width: 100%; min-width: 0;">
                 </div>
                 <div style="display: flex; align-items: center; gap: 0.75rem;">
                     <span style="font-size: 0.8rem; color: var(--text-secondary);">
                         <i class="fas fa-images"></i> ${classData.files.length} 枚
                     </span>
-                    <button class="ic-remove-class" data-class="${classIndex}"
+                    <button class="ic-remove-class" data-class="${classIndex}" aria-label="${escapeHtml(classData.name)}を削除"
                             style="background: none; border: 1px solid #fecaca; color: #ef4444;
                                    border-radius: 6px; padding: 0.25rem 0.5rem; font-size: 0.75rem; cursor: pointer;">
                         <i class="fas fa-trash"></i>
@@ -245,7 +268,8 @@ function createClassCard(classData, classIndex) {
                 </div>
             </div>
 
-            <div class="ic-drop-zone" data-class="${classIndex}"
+            <div class="ic-drop-zone" data-class="${classIndex}" role="button" tabindex="0"
+                 aria-label="${escapeHtml(classData.name)}へ画像を追加"
                  style="border: 2px dashed var(--border-color); border-radius: 8px; padding: 1rem;
                         text-align: center; cursor: pointer; transition: all 0.3s ease;
                         background: var(--background); min-height: 60px;">
@@ -267,6 +291,7 @@ function createClassCard(classData, classIndex) {
 // ==========================================
 
 export function render(container, _data, _characteristics) {
+    dispose();
     let state = createInitialState();
     state = updateState(state, {
         classes: [
@@ -274,6 +299,11 @@ export function render(container, _data, _characteristics) {
             { name: 'クラス 2', files: [], thumbnails: [], images: [] }
         ]
     });
+    _activeCleanup = () => {
+        if (state.classifier?.dispose) state.classifier.dispose();
+        if (state.mobileNetModel?.model?.dispose) state.mobileNetModel.model.dispose();
+        container.querySelectorAll('.js-plotly-plot').forEach(plot => globalThis.Plotly?.purge(plot));
+    };
 
     container.innerHTML = `
         <h2><i class="fas fa-image" style="color: ${THEME_COLOR};"></i> 画像分類 (Image Classification)</h2>
@@ -391,7 +421,7 @@ export function render(container, _data, _characteristics) {
                 </div>
                 <div id="ic-per-class-section" style="margin-top: 1.5rem;">
                     <h4 style="font-size: 0.95rem; margin-bottom: 0.5rem;">
-                        <i class="fas fa-table" style="color: ${THEME_COLOR};"></i> クラス別精度
+                        <i class="fas fa-table" style="color: ${THEME_COLOR};"></i> クラス別再現率
                     </h4>
                     <div id="ic-per-class-table"></div>
                 </div>
@@ -427,7 +457,7 @@ export function render(container, _data, _characteristics) {
                     <!-- 2. Confidence Analysis -->
                     <div id="ic-confidence-section" style="display: none; margin-bottom: 2rem;">
                         <h4 style="font-size: 0.95rem; margin-bottom: 0.5rem;">
-                            <i class="fas fa-star-half-alt" style="color: ${THEME_COLOR};"></i> 信頼度分析
+                            <i class="fas fa-star-half-alt" style="color: ${THEME_COLOR};"></i> 検証データの予測スコア
                         </h4>
                         <p style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 0.75rem;">
                             モデルが最も自信を持って正しく分類した画像と、判断に迷った画像を表示します。
@@ -467,7 +497,7 @@ export function render(container, _data, _characteristics) {
                 <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 1rem;">
                     分類したい画像をアップロードしてください。学習済みモデルで予測を行います。
                 </p>
-                <div id="ic-predict-drop-zone"
+                <div id="ic-predict-drop-zone" role="button" tabindex="0" aria-label="予測する画像を選択"
                      style="border: 2px dashed ${THEME_COLOR_BORDER}; border-radius: 12px; padding: 2rem;
                             text-align: center; cursor: pointer; transition: all 0.3s ease;
                             background: var(--background);">
@@ -576,6 +606,11 @@ export function render(container, _data, _characteristics) {
     });
 }
 
+export function dispose() {
+    if (_activeCleanup) _activeCleanup();
+    _activeCleanup = null;
+}
+
 // ==========================================
 // Class Cards Rendering & Event Listeners
 // ==========================================
@@ -605,9 +640,14 @@ function setupSetupEventListeners(container, getState, setState) {
             e.preventDefault();
             zone.style.borderColor = 'var(--border-color)';
             zone.style.background = 'var(--background)';
-            const files = Array.from(e.dataTransfer.files).filter(isValidImageFile);
-            if (files.length === 0) {
-                showError(container, '対応する画像形式（JPG, PNG, WEBP）のみアップロードできます。');
+            let files;
+            try {
+                files = validateImageBatch(
+                    Array.from(e.dataTransfer.files),
+                    getState().classes[classIdx]?.files.length || 0
+                );
+            } catch (error) {
+                showError(container, error.message);
                 return;
             }
             const newState = await addImagesToClass(getState, classIdx, files);
@@ -623,15 +663,31 @@ function setupSetupEventListeners(container, getState, setState) {
             fileInput.click();
         });
 
+        zone.addEventListener('keydown', (e) => {
+            if (e.target !== zone || !['Enter', ' '].includes(e.key)) return;
+            e.preventDefault();
+            zone.querySelector('.ic-file-input').click();
+        });
+
         const fileInput = zone.querySelector('.ic-file-input');
         fileInput.addEventListener('change', async (e) => {
-            const files = Array.from(e.target.files).filter(isValidImageFile);
-            if (files.length === 0) return;
+            let files;
+            try {
+                files = validateImageBatch(
+                    Array.from(e.target.files),
+                    getState().classes[classIdx]?.files.length || 0
+                );
+            } catch (error) {
+                showError(container, error.message);
+                e.target.value = '';
+                return;
+            }
             const newState = await addImagesToClass(getState, classIdx, files);
             setState(newState);
             renderClassCards(container, newState);
             setupSetupEventListeners(container, () => getState(), setState);
             updateDataSummary(container, newState);
+            e.target.value = '';
         });
     });
 
@@ -718,13 +774,13 @@ function updateDataSummary(container, state) {
     if (totalImages > 0) {
         summaryEl.style.display = 'block';
         const classDetails = state.classes
-            .map(c => `${c.name}: ${c.files.length}枚`)
+            .map(c => `${escapeHtml(c.name)}: ${c.files.length}枚`)
             .join(' / ');
 
         const warnings = [];
         state.classes.forEach(c => {
             if (c.files.length < 2) {
-                warnings.push(`「${c.name}」に画像が不足しています（最低2枚）`);
+                warnings.push(`「${escapeHtml(c.name)}」に画像が不足しています（最低2枚）`);
             }
         });
 
@@ -769,7 +825,7 @@ function renderDataPreparationSummary(container, state) {
             : '';
         return `
             <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0;">
-                <span style="font-weight: 600; min-width: 80px; color: ${THEME_COLOR};">${cls.name}</span>
+                <span style="font-weight: 600; min-width: 80px; color: ${THEME_COLOR};">${escapeHtml(cls.name)}</span>
                 <div style="display: flex; gap: 3px; flex-wrap: wrap; align-items: center;">
                     ${thumbs}${extra}
                 </div>
@@ -812,7 +868,7 @@ async function runTraining(container, state) {
     trainingLog.innerHTML = '';
 
     const log = (msg) => {
-        trainingLog.innerHTML += msg + '<br>';
+        trainingLog.append(document.createTextNode(msg), document.createElement('br'));
         trainingLog.scrollTop = trainingLog.scrollHeight;
     };
 
@@ -825,6 +881,21 @@ async function runTraining(container, state) {
     const mobileNetLib = getMobileNet();
     const mobileNetModel = await mobileNetLib.load({ version: 2, alpha: 1.0 });
     log('[OK] MobileNet の読み込み完了');
+
+    const tensorsToDispose = new Set();
+    const trackTensor = tensor => {
+        tensorsToDispose.add(tensor);
+        return tensor;
+    };
+    const disposeTrackedTensors = () => {
+        tensorsToDispose.forEach(tensor => {
+            if (!tensor.isDisposedInternal) tensor.dispose();
+        });
+        tensorsToDispose.clear();
+    };
+    let classifier = null;
+
+    try {
 
     // Extract features
     progressLabel.textContent = '特徴量を抽出中...';
@@ -841,7 +912,7 @@ async function runTraining(container, state) {
     for (let ci = 0; ci < state.classes.length; ci++) {
         const cls = state.classes[ci];
         for (let imgIdx = 0; imgIdx < cls.images.length; imgIdx++) {
-            const embedding = mobileNetModel.infer(cls.images[imgIdx], true);
+            const embedding = trackTensor(mobileNetModel.infer(cls.images[imgIdx], true));
             allFeatures.push(embedding);
             allLabels.push(ci);
             allThumbnails.push(cls.thumbnails[imgIdx]);
@@ -849,43 +920,41 @@ async function runTraining(container, state) {
         log(`[OK] ${cls.name}: ${cls.images.length}枚の特徴量抽出完了`);
     }
 
-    const featuresTensor = tfLib.concat(allFeatures, 0);
+    const featuresTensor = trackTensor(tfLib.concat(allFeatures, 0));
     const featureShape = featuresTensor.shape[1];
 
     // Create one-hot labels
-    const labelsTensor = tfLib.oneHot(tfLib.tensor1d(allLabels, 'int32'), numClasses);
+    const labelIndicesTensor = trackTensor(tfLib.tensor1d(allLabels, 'int32'));
+    const labelsTensor = trackTensor(tfLib.oneHot(labelIndicesTensor, numClasses));
 
     log(`[INFO] 特徴量サイズ: ${featuresTensor.shape}, ラベル数: ${allLabels.length}`);
 
-    // Shuffle data
+    // Stratification keeps every class in both partitions; a fixed seed makes
+    // comparisons repeatable across runs.
     const numSamples = allLabels.length;
-    const indices = Array.from({ length: numSamples }, (_, i) => i);
-    for (let i = indices.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        const tmp = indices[i];
-        indices[i] = indices[j];
-        indices[j] = tmp;
-    }
-    const shuffledIndices = tfLib.tensor1d(indices, 'int32');
-    const shuffledFeatures = tfLib.gather(featuresTensor, shuffledIndices);
-    const shuffledLabels = tfLib.gather(labelsTensor, shuffledIndices);
-
-    // Split validation
     const valRatio = parseFloat(container.querySelector('#ic-validation-select').value);
-    const valSize = Math.max(1, Math.floor(numSamples * valRatio));
-    const trainSize = numSamples - valSize;
-
-    const trainFeatures = shuffledFeatures.slice(0, trainSize);
-    const trainLabels = shuffledLabels.slice(0, trainSize);
-    const valFeatures = shuffledFeatures.slice(trainSize);
-    const valLabels = shuffledLabels.slice(trainSize);
+    const split = trainTestSplit(
+        Array.from({ length: numSamples }, (_, index) => [index]),
+        allLabels,
+        { testSize: valRatio, stratify: true, randomState: 42 }
+    );
+    const trainIndices = split.XTrain.map(([index]) => index);
+    const validationIndices = split.XTest.map(([index]) => index);
+    const trainSize = trainIndices.length;
+    const valSize = validationIndices.length;
+    const trainIndexTensor = trackTensor(tfLib.tensor1d(trainIndices, 'int32'));
+    const validationIndexTensor = trackTensor(tfLib.tensor1d(validationIndices, 'int32'));
+    const trainFeatures = trackTensor(tfLib.gather(featuresTensor, trainIndexTensor));
+    const trainLabels = trackTensor(tfLib.gather(labelsTensor, trainIndexTensor));
+    const valFeatures = trackTensor(tfLib.gather(featuresTensor, validationIndexTensor));
+    const valLabels = trackTensor(tfLib.gather(labelsTensor, validationIndexTensor));
 
     // Build classifier
     progressLabel.textContent = 'モデルを構築中...';
     progressPercent.textContent = '40%';
     progressFill.style.width = '40%';
 
-    const classifier = buildClassifier(featureShape, numClasses);
+    classifier = buildClassifier(featureShape, numClasses);
     log('[OK] 分類モデルの構築完了');
 
     // Train
@@ -924,32 +993,17 @@ async function runTraining(container, state) {
     progressFill.style.width = '100%';
     log('[OK] 学習が完了しました');
 
-    // Compute per-class accuracy and confusion matrix for evaluation
-    const valPredTensor = classifier.predict(valFeatures);
-    const valPredIndices = valPredTensor.argMax(1).arraySync();
-    const valTrueIndices = valLabels.argMax(1).arraySync();
+    // Evaluate only on the held-out validation partition.
+    const valPredTensor = trackTensor(classifier.predict(valFeatures));
+    const validationProbabilities = valPredTensor.arraySync();
+    const valPredIndices = validationProbabilities.map(row => row.indexOf(Math.max(...row)));
+    const valTrueIndices = [...split.yTest];
 
     // Save embeddings for visualization before disposal
     const embeddingsForViz = featuresTensor.arraySync();
     const labelsForViz = [...allLabels];
 
-    // Compute per-sample confidence for insights
-    const allPredTensor = classifier.predict(featuresTensor);
-    const allProbabilities = allPredTensor.arraySync();
-    allPredTensor.dispose();
-
-    // Cleanup intermediate tensors
-    featuresTensor.dispose();
-    labelsTensor.dispose();
-    shuffledIndices.dispose();
-    shuffledFeatures.dispose();
-    shuffledLabels.dispose();
-    trainFeatures.dispose();
-    trainLabels.dispose();
-    valFeatures.dispose();
-    valLabels.dispose();
-    valPredTensor.dispose();
-    allFeatures.forEach(t => t.dispose());
+    disposeTrackedTensors();
 
     return {
         mobileNetModel,
@@ -966,9 +1020,18 @@ async function runTraining(container, state) {
             embeddingsForViz,
             labelsForViz,
             allThumbnails,
-            allProbabilities
+            validationThumbnails: validationIndices.map(index => allThumbnails[index]),
+            validationIndices: [...validationIndices],
+            validationLabels: [...split.yTest],
+            validationProbabilities
         }
     };
+    } catch (error) {
+        disposeTrackedTensors();
+        if (classifier?.dispose) classifier.dispose();
+        if (mobileNetModel?.model?.dispose) mobileNetModel.model.dispose();
+        throw error;
+    }
 }
 
 // ==========================================
@@ -1010,6 +1073,9 @@ function renderEvaluation(container, state) {
         <div class="metric-card">
             <div class="metric-label">検証データ数</div>
             <div class="metric-value" style="color: var(--text-primary);">${history.valSize}</div>
+        </div>
+        <div style="grid-column: 1 / -1; color: var(--text-secondary); font-size: 0.85rem;">
+            クラスごとの比率を保った未学習データで評価しています（固定seed）。各クラスの件数が少ない場合、評価値は大きく変動します。
         </div>
     `;
 
@@ -1054,7 +1120,7 @@ function renderEvaluation(container, state) {
         legend: { x: 0.6, y: 0.1 }
     });
 
-    // Per-class accuracy
+    // Per-class recall
     renderPerClassAccuracy(container, history);
 
     // Confusion matrix
@@ -1072,19 +1138,19 @@ function renderPerClassAccuracy(container, history) {
     const perClass = classNames.map((name, ci) => {
         const trueForClass = valTrue.filter((v) => v === ci).length;
         const correctForClass = valTrue.filter((v, i) => v === ci && valPred[i] === ci).length;
-        const acc = trueForClass > 0 ? correctForClass / trueForClass : 0;
-        return { name, total: trueForClass, correct: correctForClass, accuracy: acc };
+        const recall = trueForClass > 0 ? correctForClass / trueForClass : null;
+        return { name, total: trueForClass, correct: correctForClass, recall };
     });
 
     const tableEl = container.querySelector('#ic-per-class-table');
     let html = '<div class="table-container"><table class="table">';
-    html += '<thead><tr><th>クラス</th><th>検証データ数</th><th>正解数</th><th>精度</th></tr></thead><tbody>';
+    html += '<thead><tr><th>クラス</th><th>検証データ数</th><th>正解数</th><th>再現率</th></tr></thead><tbody>';
     perClass.forEach(pc => {
         html += `<tr>
-            <td><strong>${pc.name}</strong></td>
+            <td><strong>${escapeHtml(pc.name)}</strong></td>
             <td>${pc.total}</td>
             <td>${pc.correct}</td>
-            <td>${formatNumber(pc.accuracy, 4)}</td>
+            <td>${pc.recall == null ? 'N/A' : formatNumber(pc.recall, 4)}</td>
         </tr>`;
     });
     html += '</tbody></table></div>';
@@ -1112,6 +1178,7 @@ function renderConfusionMatrixSection(container, history) {
 function computePCA2D(embeddings) {
     const n = embeddings.length;
     const d = embeddings[0].length;
+    const rng = createSeededRandom(42);
 
     const mean = new Float64Array(d);
     for (let i = 0; i < n; i++) {
@@ -1127,7 +1194,7 @@ function computePCA2D(embeddings) {
 
     function powerIteration(data, numIter = 50) {
         let v = new Float64Array(d);
-        for (let j = 0; j < d; j++) v[j] = Math.random() - 0.5;
+        for (let j = 0; j < d; j++) v[j] = rng() - 0.5;
         let norm = Math.sqrt(v.reduce((s, x) => s + x * x, 0));
         for (let j = 0; j < d; j++) v[j] /= norm;
 
@@ -1209,15 +1276,22 @@ function renderPCAChart(container, history) {
 }
 
 function renderConfidenceAnalysis(container, history) {
-    const { classNames, labelsForViz, allProbabilities, allThumbnails } = history;
-    if (!allProbabilities || !allThumbnails) return;
+    const {
+        classNames,
+        validationLabels,
+        validationProbabilities,
+        validationThumbnails
+    } = history;
+    if (!validationProbabilities || !validationThumbnails) return;
 
     const contentEl = container.querySelector('#ic-confidence-content');
-    let html = '';
+    let html = `<p style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 1rem;">
+        ここでのスコアは検証データに対するSoftmax出力であり、校正済みの確率ではありません。
+    </p>`;
 
     classNames.forEach((className, ci) => {
-        const samples = labelsForViz
-            .map((label, idx) => ({ idx, label, probs: allProbabilities[idx] }))
+        const samples = validationLabels
+            .map((label, idx) => ({ idx, label, probs: validationProbabilities[idx] }))
             .filter(s => s.label === ci);
 
         if (samples.length === 0) return;
@@ -1234,9 +1308,9 @@ function renderConfidenceAnalysis(container, history) {
 
         html += `<div style="margin-bottom: 1.5rem; padding: 1rem; background: var(--background); border-radius: 0.5rem; border: 1px solid var(--border-color);">`;
         html += `<h5 style="font-size: 0.9rem; margin-bottom: 0.75rem; color: var(--text-primary);">
-                    <i class="fas fa-tag" style="color: ${THEME_COLOR};"></i> ${className}
+                    <i class="fas fa-tag" style="color: ${THEME_COLOR};"></i> ${escapeHtml(className)}
                     <span style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 0.5rem;">
-                        (正解率: ${correct.length}/${samples.length} = ${formatNumber(correct.length / samples.length, 2)})
+                        (検証再現率: ${correct.length}/${samples.length} = ${formatNumber(correct.length / samples.length, 2)})
                     </span>
                  </h5>`;
 
@@ -1244,12 +1318,12 @@ function renderConfidenceAnalysis(container, history) {
             const top = correct.slice(0, 3);
             html += `<div style="margin-bottom: 0.75rem;">
                 <span style="font-size: 0.8rem; color: #059669; font-weight: 600;">
-                    <i class="fas fa-check-circle"></i> 最も自信あり
+                    <i class="fas fa-check-circle"></i> 正解クラスの予測スコアが高い例
                 </span>
                 <div style="display: flex; gap: 0.5rem; margin-top: 0.4rem; flex-wrap: wrap;">`;
             top.forEach(s => {
                 html += `<div style="text-align: center;">
-                    <img src="${allThumbnails[s.idx]}" style="width: 56px; height: 56px; object-fit: cover; border-radius: 4px; border: 2px solid #059669;">
+                    <img src="${validationThumbnails[s.idx]}" style="width: 56px; height: 56px; object-fit: cover; border-radius: 4px; border: 2px solid #059669;">
                     <div style="font-size: 0.7rem; color: var(--text-secondary);">${formatNumber(s.correctProb * 100, 1)}%</div>
                 </div>`;
             });
@@ -1259,12 +1333,12 @@ function renderConfidenceAnalysis(container, history) {
                 const bottom = correct.slice(-Math.min(2, correct.length - 1));
                 html += `<div style="margin-bottom: 0.75rem;">
                     <span style="font-size: 0.8rem; color: #f59e0b; font-weight: 600;">
-                        <i class="fas fa-exclamation-triangle"></i> 判断に迷い（正解だが低信頼度）
+                        <i class="fas fa-exclamation-triangle"></i> 正解だが予測スコアが低い例
                     </span>
                     <div style="display: flex; gap: 0.5rem; margin-top: 0.4rem; flex-wrap: wrap;">`;
                 bottom.forEach(s => {
                     html += `<div style="text-align: center;">
-                        <img src="${allThumbnails[s.idx]}" style="width: 56px; height: 56px; object-fit: cover; border-radius: 4px; border: 2px solid #f59e0b;">
+                        <img src="${validationThumbnails[s.idx]}" style="width: 56px; height: 56px; object-fit: cover; border-radius: 4px; border: 2px solid #f59e0b;">
                         <div style="font-size: 0.7rem; color: var(--text-secondary);">${formatNumber(s.correctProb * 100, 1)}%</div>
                     </div>`;
                 });
@@ -1281,8 +1355,8 @@ function renderConfidenceAnalysis(container, history) {
             incorrect.slice(0, 4).forEach(s => {
                 const predictedName = classNames[s.predictedClass];
                 html += `<div style="text-align: center;">
-                    <img src="${allThumbnails[s.idx]}" style="width: 56px; height: 56px; object-fit: cover; border-radius: 4px; border: 2px solid #ef4444;">
-                    <div style="font-size: 0.65rem; color: #ef4444;">→ ${predictedName}</div>
+                    <img src="${validationThumbnails[s.idx]}" style="width: 56px; height: 56px; object-fit: cover; border-radius: 4px; border: 2px solid #ef4444;">
+                    <div style="font-size: 0.65rem; color: #ef4444;">→ ${escapeHtml(predictedName)}</div>
                     <div style="font-size: 0.65rem; color: var(--text-secondary);">${formatNumber(s.correctProb * 100, 1)}%</div>
                 </div>`;
             });
@@ -1306,7 +1380,7 @@ async function computeOcclusionMap(mobileNetModel, classifier, imgElement, class
     ctx.drawImage(imgElement, 0, 0, IMAGE_SIZE, IMAGE_SIZE);
     const baselineTensor = imageToTensor(canvas);
     const baselineEmbed = mobileNetModel.infer(baselineTensor, true);
-    const baselineProb = classifier.predict(baselineEmbed).arraySync()[0][classIdx];
+    const baselineProb = tfLib.tidy(() => classifier.predict(baselineEmbed).arraySync()[0][classIdx]);
     baselineTensor.dispose();
     baselineEmbed.dispose();
 
@@ -1326,7 +1400,7 @@ async function computeOcclusionMap(mobileNetModel, classifier, imgElement, class
 
             const occTensor = imageToTensor(canvas);
             const occEmbed = mobileNetModel.infer(occTensor, true);
-            const occProb = classifier.predict(occEmbed).arraySync()[0][classIdx];
+            const occProb = tfLib.tidy(() => classifier.predict(occEmbed).arraySync()[0][classIdx]);
             occTensor.dispose();
             occEmbed.dispose();
 
@@ -1405,7 +1479,14 @@ function renderOcclusionHeatmap(canvasId, imgElement, occResult) {
 }
 
 async function renderOcclusionAnalysis(container, state, history) {
-    const { classNames, labelsForViz, allProbabilities, allThumbnails } = history;
+    const {
+        classNames,
+        labelsForViz,
+        validationIndices,
+        validationLabels,
+        validationProbabilities,
+        validationThumbnails
+    } = history;
     if (!state.mobileNetModel || !state.classifier) return;
 
     const contentEl = container.querySelector('#ic-occlusion-content');
@@ -1413,23 +1494,29 @@ async function renderOcclusionAnalysis(container, state, history) {
 
     const representativeImages = [];
     classNames.forEach((className, ci) => {
-        const samples = labelsForViz
-            .map((label, idx) => ({ idx, label, prob: allProbabilities[idx][ci] }))
-            .filter(s => s.label === ci && allProbabilities[s.idx].indexOf(Math.max(...allProbabilities[s.idx])) === ci)
+        const samples = validationLabels
+            .map((label, idx) => ({ idx, label, prob: validationProbabilities[idx][ci] }))
+            .filter(s => s.label === ci && validationProbabilities[s.idx].indexOf(Math.max(...validationProbabilities[s.idx])) === ci)
             .sort((a, b) => b.prob - a.prob);
 
         if (samples.length > 0) {
-            representativeImages.push({ classIdx: ci, className, sampleIdx: samples[0].idx, prob: samples[0].prob });
+            representativeImages.push({
+                classIdx: ci,
+                className,
+                sampleIdx: samples[0].idx,
+                globalIndex: validationIndices[samples[0].idx],
+                prob: samples[0].prob
+            });
         }
     });
 
     representativeImages.forEach((rep, idx) => {
         html += `<div style="text-align: center; min-width: 240px;">
-            <p style="font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem;">${rep.className}</p>
+            <p style="font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem;">${escapeHtml(rep.className)}</p>
             <div style="display: flex; gap: 0.5rem; justify-content: center; align-items: start;">
                 <div>
                     <p style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.25rem;">元画像</p>
-                    <img src="${allThumbnails[rep.sampleIdx]}" style="width: 112px; height: 112px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <img src="${validationThumbnails[rep.sampleIdx]}" style="width: 112px; height: 112px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border-color);">
                 </div>
                 <div>
                     <p style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.25rem;">注目領域</p>
@@ -1450,7 +1537,7 @@ async function renderOcclusionAnalysis(container, state, history) {
     for (let idx = 0; idx < representativeImages.length; idx++) {
         const rep = representativeImages[idx];
         const imgEl = state.classes[rep.classIdx].images[
-            labelsForViz.slice(0, rep.sampleIdx + 1).filter(l => l === rep.classIdx).length - 1
+            labelsForViz.slice(0, rep.globalIndex + 1).filter(l => l === rep.classIdx).length - 1
         ];
         if (!imgEl) continue;
 
@@ -1461,7 +1548,7 @@ async function renderOcclusionAnalysis(container, state, history) {
             renderOcclusionHeatmap(`ic-occlusion-canvas-${idx}`, imgEl, occResult);
             const statusEl = container.querySelector(`#ic-occlusion-status-${idx}`);
             if (statusEl) {
-                statusEl.innerHTML = `ベースライン信頼度: ${formatNumber(occResult.baselineProb * 100, 1)}%`;
+                statusEl.textContent = `ベースライン予測スコア: ${formatNumber(occResult.baselineProb * 100, 1)}%`;
             }
         } catch (e) {
             const statusEl = container.querySelector(`#ic-occlusion-status-${idx}`);
@@ -1522,12 +1609,20 @@ function setupPredictionListeners(container, getState) {
     });
 
     dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            fileInput.click();
+        }
+    });
 
     fileInput.addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
         if (!isValidImageFile(file)) {
-            showError(container, '対応する画像形式（JPG, PNG, WEBP）のみ使用できます。');
+            showError(container, ACCEPTED_TYPES.includes(file.type)
+                ? '画像1枚あたりの上限は15 MiBです。'
+                : '対応する画像形式（JPG, PNG, WEBP）のみ使用できます。');
             return;
         }
         await predictImage(container, getState(), file);
@@ -1554,17 +1649,14 @@ async function predictImage(container, state, file) {
         const thumbnailSrc = await createThumbnail(file);
 
         // Extract features and predict
-        const embedding = state.mobileNetModel.infer(img, true);
-        const prediction = state.classifier.predict(embedding);
-        const probabilities = prediction.arraySync()[0];
+        const probabilities = getTf().tidy(() => {
+            const embedding = state.mobileNetModel.infer(img, true);
+            return state.classifier.predict(embedding).arraySync()[0];
+        });
         const predictedIndex = probabilities.indexOf(Math.max(...probabilities));
         const classNames = state.trainingHistory.classNames;
         const predictedClass = classNames[predictedIndex];
         const confidence = probabilities[predictedIndex];
-
-        // Cleanup tensors
-        embedding.dispose();
-        prediction.dispose();
 
         // Sort class probabilities descending
         const sortedProbs = classNames
@@ -1572,29 +1664,29 @@ async function predictImage(container, state, file) {
             .sort((a, b) => b.probability - a.probability);
 
         resultEl.innerHTML = `
-            <div style="display: grid; grid-template-columns: auto 1fr; gap: 1.5rem; align-items: start;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 1.5rem; align-items: start;">
                 <div style="text-align: center;">
-                    <img src="${thumbnailSrc}"
+                    <img src="${thumbnailSrc}" alt="${escapeHtml(file.name)}"
                          style="width: 180px; height: 180px; object-fit: cover; border-radius: 12px;
                                 border: 2px solid var(--border-color); box-shadow: var(--shadow-md);">
-                    <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.5rem;">${file.name}</p>
+                    <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.5rem;">${escapeHtml(file.name)}</p>
                 </div>
                 <div>
                     <div style="background: ${THEME_COLOR_LIGHT}; border: 1px solid ${THEME_COLOR_BORDER};
                                 border-radius: 10px; padding: 1rem; margin-bottom: 1rem;">
                         <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.25rem;">予測結果</div>
                         <div style="font-size: 1.5rem; font-weight: 700; color: ${THEME_COLOR};">
-                            ${predictedClass}
+                            ${escapeHtml(predictedClass)}
                         </div>
                         <div style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.25rem;">
-                            信頼度: ${(confidence * 100).toFixed(1)}%
+                            予測スコア: ${(confidence * 100).toFixed(1)}%
                         </div>
                     </div>
-                    <div style="font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem;">クラス別確率:</div>
+                    <div style="font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem;">クラス別予測スコア:</div>
                     ${sortedProbs.map(sp => `
                         <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.4rem;">
                             <span style="width: 80px; font-size: 0.8rem; text-align: right; color: var(--text-secondary);">
-                                ${sp.name}
+                                ${escapeHtml(sp.name)}
                             </span>
                             <div style="flex: 1; height: 20px; background: var(--border-color); border-radius: 4px; overflow: hidden;">
                                 <div style="width: ${(sp.probability * 100).toFixed(1)}%; height: 100%;
@@ -1625,7 +1717,7 @@ async function predictImage(container, state, file) {
             textposition: 'outside',
             hovertemplate: '%{x}: %{y:.4f}<extra></extra>'
         }], {
-            title: 'クラス別予測確率',
+            title: 'クラス別予測スコア（校正済み確率ではありません）',
             yaxis: { title: '確率', range: [0, 1.1] },
             height: 300,
             margin: { t: 40, b: 60 }
@@ -1636,7 +1728,7 @@ async function predictImage(container, state, file) {
         resultEl.innerHTML = `
             <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;
                         padding: 1rem; color: #dc2626;">
-                <i class="fas fa-exclamation-triangle"></i> 予測中にエラーが発生しました: ${error.message}
+                <i class="fas fa-exclamation-triangle"></i> 予測中にエラーが発生しました: ${escapeHtml(error.message)}
             </div>`;
     }
 }

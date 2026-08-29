@@ -3,10 +3,12 @@
  *
  * Provides two methods:
  * 1. linearSHAP - Exact SHAP for linear models (O(n*p))
- * 2. kernelSHAP - Model-agnostic approximate SHAP (O(2^p * bg * n))
+ * 2. kernelSHAP - Seeded permutation approximation for any model
  *
  * @module shap
  */
+
+import { createSeededRandom, shuffleCopy } from './random.js';
 
 // ===========================================================================
 // Linear SHAP (exact for linear models)
@@ -41,182 +43,100 @@ export function linearSHAP(coefficients, intercept, X, featureMeans) {
 // ===========================================================================
 
 /**
- * Compute approximate SHAP values using Kernel SHAP.
+ * Compute model-agnostic interventional SHAP values with sampled permutations.
  *
- * Uses the Shapley kernel weighting scheme with weighted least squares
- * to estimate feature contributions for any model.
+ * Each sampled path starts from a background row and adds features in a
+ * random order. The path increments telescope exactly to f(x)-f(background),
+ * so local additivity is preserved even when only a subset of permutations is
+ * sampled. Correlated features can still share credit differently depending on
+ * the supplied background distribution.
  *
  * @param {function(number[][]): number[]} predictFn - Prediction function (batch input → batch output)
  * @param {number[][]} X - Instances to explain (n x p)
  * @param {number[][]} background - Background dataset for marginalization
  * @param {Object} [options]
  * @param {number} [options.maxBackground=50] - Max background samples to use
- * @returns {{ shapValues: number[][], baseValue: number }}
+ * @param {number} [options.nPermutations] - Permutations per instance
+ * @param {number} [options.maxEvaluations=50000] - Approximate total prediction budget
+ * @param {number} [options.randomState=42] - Deterministic seed
+ * @returns {{ shapValues: number[][], baseValue: number, nPermutations: number, maxAdditivityError: number }}
  */
 export function kernelSHAP(predictFn, X, background, options = {}) {
-    const { maxBackground = 50 } = options;
+    const {
+        maxBackground = 50,
+        maxEvaluations = 50000,
+        randomState = 42,
+    } = options;
+    if (typeof predictFn !== 'function') throw new Error('kernelSHAP: predictFn must be a function');
+    if (!Array.isArray(X) || X.length === 0 || !Array.isArray(X[0]) || X[0].length === 0) {
+        throw new Error('kernelSHAP: X must be a non-empty 2D array');
+    }
+    if (!Array.isArray(background) || background.length === 0 || !Array.isArray(background[0])) {
+        throw new Error('kernelSHAP: background must be a non-empty 2D array');
+    }
 
     const bg = background.length > maxBackground
         ? background.slice(0, maxBackground)
         : background;
+    const nFeatures = X[0].length;
+    if (X.some(row => row.length !== nFeatures) || bg.some(row => row.length !== nFeatures)) {
+        throw new Error('kernelSHAP: all rows must have the same feature count');
+    }
 
     const bgPreds = predictFn(bg);
+    if (!Array.isArray(bgPreds) || bgPreds.length !== bg.length || bgPreds.some(value => !Number.isFinite(value))) {
+        throw new Error('kernelSHAP: predictFn returned invalid background predictions');
+    }
     const baseValue = bgPreds.reduce((a, b) => a + b, 0) / bgPreds.length;
+    const budgetPermutations = Math.max(1, Math.floor(maxEvaluations / Math.max(1, X.length * bg.length * nFeatures)));
+    const nPermutations = Math.max(1, Math.min(
+        Number.isInteger(options.nPermutations) ? options.nPermutations : 64,
+        budgetPermutations
+    ));
+    const rng = createSeededRandom(randomState);
+    let maxAdditivityError = 0;
+    const shapValues = X.map(x => {
+        const values = _permutationSHAPInstance(predictFn, x, bg, bgPreds, nPermutations, rng);
+        const prediction = predictFn([x])[0];
+        if (!Number.isFinite(prediction)) throw new Error('kernelSHAP: predictFn returned a non-finite value');
+        const explained = baseValue + values.reduce((sum, value) => sum + value, 0);
+        const residual = prediction - explained;
+        maxAdditivityError = Math.max(maxAdditivityError, Math.abs(residual));
+        if (Math.abs(residual) > 1e-12) values[values.length - 1] += residual;
+        return values;
+    });
 
-    const nFeatures = X[0].length;
-
-    const shapValues = X.map(x =>
-        _kernelSHAPInstance(predictFn, x, bg, nFeatures, baseValue)
-    );
-
-    return { shapValues, baseValue };
+    return { shapValues, baseValue, nPermutations, maxAdditivityError };
 }
 
 /**
  * Compute SHAP values for a single instance using Kernel SHAP.
  * @private
  */
-function _kernelSHAPInstance(predictFn, x, background, nFeatures, baseValue) {
-    const totalCoalitions = 1 << nFeatures; // 2^nFeatures
-    const coalitions = [];
-    const weights = [];
-    const effects = [];
+function _permutationSHAPInstance(predictFn, x, background, backgroundPredictions, nPermutations, rng) {
+    const nFeatures = x.length;
+    const contributions = Array(nFeatures).fill(0);
+    const featureIndices = Array.from({ length: nFeatures }, (_, index) => index);
 
-    for (let mask = 1; mask < totalCoalitions - 1; mask++) {
-        const coalition = [];
-        let nIncluded = 0;
-        for (let f = 0; f < nFeatures; f++) {
-            const included = (mask >> f) & 1;
-            coalition.push(included);
-            nIncluded += included;
-        }
-
-        const weight = _kernelWeight(nFeatures, nIncluded);
-
-        // Build masked samples: included features use x, excluded use background
-        const maskedX = background.map(bg =>
-            x.map((val, f) => coalition[f] ? val : bg[f])
-        );
-
-        const preds = predictFn(maskedX);
-        const meanPred = preds.reduce((a, b) => a + b, 0) / preds.length;
-
-        coalitions.push(coalition);
-        weights.push(weight);
-        effects.push(meanPred - baseValue);
-    }
-
-    return _weightedLeastSquares(coalitions, effects, weights, nFeatures);
-}
-
-/**
- * Kernel SHAP weight: π(z) = (M-1) / (C(M,|z|) * |z| * (M-|z|))
- * where M = number of features, |z| = number of included features
- * @private
- */
-function _kernelWeight(M, nIncluded) {
-    return (M - 1) / (_binomial(M, nIncluded) * nIncluded * (M - nIncluded));
-}
-
-/**
- * Binomial coefficient C(n, k)
- * @private
- */
-function _binomial(n, k) {
-    if (k < 0 || k > n) return 0;
-    if (k === 0 || k === n) return 1;
-    let result = 1;
-    for (let i = 0; i < Math.min(k, n - k); i++) {
-        result = result * (n - i) / (i + 1);
-    }
-    return Math.round(result);
-}
-
-/**
- * Solve weighted least squares: (Z^T W Z) beta = Z^T W y
- * using Gaussian elimination with partial pivoting.
- * @private
- * @param {number[][]} Z - Coalition matrix (nCoalitions x nFeatures)
- * @param {number[]} y - Effects vector (nCoalitions)
- * @param {number[]} w - Weights vector (nCoalitions)
- * @param {number} nFeatures
- * @returns {number[]} SHAP values (nFeatures)
- */
-function _weightedLeastSquares(Z, y, w, nFeatures) {
-    // Compute Z^T W Z and Z^T W y
-    const A = Array.from({ length: nFeatures }, () => Array(nFeatures).fill(0));
-    const b = Array(nFeatures).fill(0);
-
-    for (let c = 0; c < Z.length; c++) {
-        for (let i = 0; i < nFeatures; i++) {
-            for (let j = 0; j < nFeatures; j++) {
-                A[i][j] += w[c] * Z[c][i] * Z[c][j];
+    for (let iteration = 0; iteration < nPermutations; iteration++) {
+        const permutation = shuffleCopy(featureIndices, rng);
+        const workingRows = background.map(row => [...row]);
+        let previous = [...backgroundPredictions];
+        for (const featureIndex of permutation) {
+            for (const row of workingRows) row[featureIndex] = x[featureIndex];
+            const current = predictFn(workingRows);
+            if (!Array.isArray(current) || current.length !== workingRows.length || current.some(value => !Number.isFinite(value))) {
+                throw new Error('kernelSHAP: predictFn returned invalid predictions');
             }
-            b[i] += w[c] * Z[c][i] * y[c];
-        }
-    }
-
-    // Add small regularization for numerical stability
-    for (let i = 0; i < nFeatures; i++) {
-        A[i][i] += 1e-10;
-    }
-
-    return _solveLinearSystem(A, b);
-}
-
-/**
- * Solve Ax = b using Gaussian elimination with partial pivoting.
- * @private
- * @param {number[][]} A - Square matrix (n x n)
- * @param {number[]} b - Right-hand side (n)
- * @returns {number[]} Solution vector (n)
- */
-function _solveLinearSystem(A, b) {
-    const n = A.length;
-    // Augmented matrix [A|b]
-    const aug = A.map((row, i) => [...row, b[i]]);
-
-    // Forward elimination with partial pivoting
-    for (let col = 0; col < n; col++) {
-        // Find pivot
-        let maxVal = Math.abs(aug[col][col]);
-        let maxRow = col;
-        for (let row = col + 1; row < n; row++) {
-            if (Math.abs(aug[row][col]) > maxVal) {
-                maxVal = Math.abs(aug[row][col]);
-                maxRow = row;
+            for (let rowIndex = 0; rowIndex < current.length; rowIndex++) {
+                contributions[featureIndex] += current[rowIndex] - previous[rowIndex];
             }
-        }
-        // Swap rows
-        if (maxRow !== col) {
-            const tmp = aug[col];
-            aug[col] = aug[maxRow];
-            aug[maxRow] = tmp;
-        }
-
-        const pivot = aug[col][col];
-        if (Math.abs(pivot) < 1e-12) continue;
-
-        // Eliminate below
-        for (let row = col + 1; row < n; row++) {
-            const factor = aug[row][col] / pivot;
-            for (let j = col; j <= n; j++) {
-                aug[row][j] -= factor * aug[col][j];
-            }
+            previous = current;
         }
     }
 
-    // Back substitution
-    const x = Array(n).fill(0);
-    for (let i = n - 1; i >= 0; i--) {
-        let sum = aug[i][n];
-        for (let j = i + 1; j < n; j++) {
-            sum -= aug[i][j] * x[j];
-        }
-        x[i] = Math.abs(aug[i][i]) > 1e-12 ? sum / aug[i][i] : 0;
-    }
-
-    return x;
+    const denominator = nPermutations * background.length;
+    return contributions.map(value => value / denominator);
 }
 
 // ===========================================================================

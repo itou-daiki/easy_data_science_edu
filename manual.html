@@ -9,7 +9,8 @@
     <link rel="icon" href="favicon.ico" sizes="48x48">
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+        integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
 
@@ -325,7 +326,7 @@
             data-language-switch data-i18n-ignore aria-label="表示言語">
             <i class="fas fa-language" aria-hidden="true"></i>
             <button type="button" class="language-option active" data-language-option="ja"
-                aria-pressed="true">日本語</button>
+                aria-pressed="true">JP</button>
             <button type="button" class="language-option" data-language-option="en"
                 aria-pressed="false">EN</button>
         </div>
@@ -358,6 +359,7 @@
                 <a class="manual-link" href="#prediction-mode"><i class="fas fa-crosshairs"></i> 予測モード</a>
                 <a class="manual-link" href="#image"><i class="fas fa-image"></i> 画像分類</a>
                 <a class="manual-link" href="#audio"><i class="fas fa-microphone"></i> 音声分類</a>
+                <a class="manual-link" href="#video"><i class="fas fa-video"></i> 動画・画像分析</a>
             </div>
             <div class="manual-group">
                 <div class="manual-group-title">困ったとき</div>
@@ -371,7 +373,7 @@
             <section class="manual-hero">
                 <h1>easyDataScience 使い方マニュアル</h1>
                 <p>
-                    CSV / Excel の表データによる回帰・分類 AutoML、画像分類、音声分類、保存済みモデルによる予測までを、
+                    CSV / Excel の表データによる回帰・分類 AutoML、画像・音声分類、動画分析、保存済みモデルによる予測までを、
                     初学者でも迷わず進められるように整理したマニュアルです。
                 </p>
             </section>
@@ -389,8 +391,8 @@
                         <p>CSV / Excel を読み込み、回帰・分類モデルを比較、チューニング、解釈、予測できます。</p>
                     </div>
                     <div class="manual-card">
-                        <h4><i class="fas fa-image"></i> 画像・音声分類</h4>
-                        <p>MobileNet 転移学習による画像分類と、Web Audio API による音声分類を体験できます。</p>
+                        <h4><i class="fas fa-image"></i> 画像・音声・動画</h4>
+                        <p>画像・音声分類に加え、動画のコマ送り、描画、タグ、比較、ポーズ推定を体験できます。</p>
                     </div>
                     <div class="manual-card">
                         <h4><i class="fas fa-file-import"></i> モデル活用</h4>
@@ -398,7 +400,7 @@
                     </div>
                 </div>
                 <div class="manual-alert">
-                    <strong>プライバシー:</strong> データ処理はブラウザ内で行われ、アップロードしたデータを外部サーバーへ送信しません。
+                    <strong>プライバシー:</strong> 通常のデータ処理と学習はブラウザ内で行われます。生成AI支援を実行した場合だけ、選択した分析文脈が Google Gemini API へ送信されます。
                 </div>
             </section>
 
@@ -408,7 +410,7 @@
                 <p>公開されている easyDataScience のページをブラウザで開きます。インストールは不要です。</p>
                 <h3>表示言語を切り替える</h3>
                 <p data-i18n-en="Use the Japanese / EN control at the top of the page to switch the interface, result guidance, learning guide, manual, and AI assistance between Japanese and English without reloading.">
-                    ページ上部の「日本語 / EN」で、操作画面、結果説明、学習ガイド、マニュアル、生成AI支援を再読み込みなしで切り替えられます。
+                    ページ上部の「JP / EN」で、操作画面、結果説明、学習ガイド、マニュアル、生成AI支援を再読み込みなしで切り替えられます。
                 </p>
                 <p data-i18n-en="Your choice is saved in this browser and shared by the app and manual. Column names, file names, class labels, and entered values remain unchanged as user data.">
                     選択した言語はブラウザに保存され、アプリとマニュアルで共有されます。列名、ファイル名、クラス名、入力値などのユーザーデータは翻訳されません。
@@ -417,6 +419,7 @@
                 <p>リポジトリを手元に置いて使う場合は、プロジェクトルートでローカルサーバーを起動します。</p>
                 <pre class="manual-code">python3 -m http.server 8765</pre>
                 <p>ブラウザで <code>http://localhost:8765</code> を開きます。</p>
+                <p>グラフ、Excel読込、画像・動画分析のライブラリは必要になった時点でCDNから読み込みます。初回利用時はインターネット接続が必要です。</p>
                 <div class="manual-alert manual-warning">
                     <strong>注意:</strong> <code>index.html</code> を直接開くと、ES Modules やデモデータの読み込みが失敗することがあります。
                 </div>
@@ -430,9 +433,11 @@
                     <li>必要に応じて EDA で分布、相関、欠損値を確認する</li>
                     <li>目的変数の種類に合わせて「回帰」または「分類」を選ぶ</li>
                     <li>目的変数、テストデータ割合、交差検証 Fold 数、特徴量を設定する</li>
-                    <li>モデル比較を開始する</li>
-                    <li>比較表、評価指標、グラフ、解釈結果を見る</li>
-                    <li>必要に応じてチューニング、ブレンド、スタッキング、ファイナライズを行う</li>
+                    <li>モデル比較を開始し、前処理込み交差検証だけで候補を絞る</li>
+                    <li>必要に応じてチューニングし、最終候補を決める</li>
+                    <li>選んだモデルについて未使用テストデータを一度だけ開示する</li>
+                    <li>評価指標、区間、グラフ、解釈結果を見る</li>
+                    <li>必要に応じてブレンド、スタッキング、ファイナライズを行う。テスト開示後の追加比較は探索的に扱う</li>
                     <li>predict_model または予測モードで新しいデータを予測する</li>
                 </ol>
             </section>
@@ -515,15 +520,16 @@
                 <h2><i class="fas fa-chart-line"></i> 8. 回帰モデル比較（AutoML）</h2>
                 <p>住宅価格、売上、テスト点数、チップ金額など、数値を予測したいときに使います。</p>
                 <span class="manual-badge">目的変数: 数値</span>
-                <span class="manual-badge">数値変数 2つ以上</span>
+                <span class="manual-badge">数値の目的変数 + 特徴量</span>
                 <h3>操作手順</h3>
                 <ol>
                     <li>目的変数を選ぶ</li>
-                    <li>テストデータ割合を選ぶ</li>
-                    <li>交差検証 Fold 数を選ぶ</li>
+                    <li>データの生成過程に合わせ、無作為・グループ非重複・時系列から分割方法を選ぶ</li>
+                    <li>テストデータ割合と交差検証 Fold 数を選ぶ</li>
                     <li>使用する特徴量を確認する</li>
                     <li>「モデル比較を開始」を押す</li>
-                    <li>R2、MAE、RMSE、CV R2 を確認する</li>
+                    <li>前処理込みCV R2の平均とfold間SDで候補を選ぶ</li>
+                    <li>最終候補を決めてからテストデータを開示し、R2、MAE、RMSEとブートストラップ区間を確認する</li>
                 </ol>
                 <h3>搭載モデル</h3>
                 <p>線形回帰、Ridge回帰、Lasso回帰、決定木、ランダムフォレスト、K近傍法、勾配ブースティング。</p>
@@ -533,15 +539,17 @@
                 <h2><i class="fas fa-tags"></i> 9. 分類モデル比較（AutoML）</h2>
                 <p>解約する / しない、品種、合格 / 不合格など、カテゴリを予測したいときに使います。</p>
                 <span class="manual-badge">目的変数: カテゴリ</span>
-                <span class="manual-badge">数値変数 1つ以上</span>
+                <span class="manual-badge">2〜20種類の目的変数 + 特徴量</span>
                 <h3>操作手順</h3>
                 <ol>
                     <li>目的変数を選ぶ</li>
-                    <li>テストデータ割合を選ぶ</li>
-                    <li>交差検証 Fold 数を選ぶ</li>
+                    <li>二値分類ではAverage Precisionの陽性クラスを確認する</li>
+                    <li>無作為層化・グループ非重複・時系列から分割方法を選ぶ</li>
+                    <li>テストデータ割合と交差検証 Fold 数を選ぶ</li>
                     <li>使用する特徴量を確認する</li>
                     <li>「モデル比較を開始」を押す</li>
-                    <li>F1、Accuracy、Precision、Recall、AUC、CV F1 を確認する</li>
+                    <li>前処理込みCV Macro F1の平均とfold間SDで候補を選ぶ</li>
+                    <li>最終候補を決めてからテストデータを開示し、Macro F1、Accuracy、MCC、クラス別指標、AUC、二値分類のAverage Precision、混同行列を確認する</li>
                 </ol>
                 <h3>搭載モデル</h3>
                 <p>ロジスティック回帰、決定木、ランダムフォレスト、K近傍法、ナイーブベイズ、SVM、勾配ブースティング。</p>
@@ -553,9 +561,9 @@
             <section id="workflow" class="manual-section">
                 <h2><i class="fas fa-layer-group"></i> 10. AutoML ワークフロー</h2>
                 <div class="manual-grid">
-                    <div class="manual-card"><h4>Setup</h4><p>目的変数、テスト割合、Fold数、特徴量を決めます。</p></div>
-                    <div class="manual-card"><h4>Preprocess</h4><p>データ分割、欠損処理、エンコーディング、スケーリングを行います。</p></div>
-                    <div class="manual-card"><h4>Compare</h4><p>複数モデルを一括学習し、テストデータと交差検証で比較します。</p></div>
+                    <div class="manual-card"><h4>Setup</h4><p>目的変数、データ構造に合う分割方法、テスト割合、Fold数、特徴量を決めます。</p></div>
+                    <div class="manual-card"><h4>Preprocess</h4><p>各訓練区画の中だけで欠損処理、One-Hot Encoding、変換、スケーリングを学習します。</p></div>
+                    <div class="manual-card"><h4>Compare</h4><p>テストデータを封印したまま、前処理込み交差検証で複数モデルを比較します。</p></div>
                     <div class="manual-card"><h4>Tune</h4><p>ハイパーパラメータを探索します。</p></div>
                     <div class="manual-card"><h4>Interpret</h4><p>特徴量重要度、PDP、学習曲線、SHAP 系の可視化を確認します。</p></div>
                     <div class="manual-card"><h4>Finalize / Predict</h4><p>最終モデルを確定し、新しいデータを予測します。</p></div>
@@ -568,7 +576,7 @@
                 <div class="manual-grid">
                     <div class="manual-card">
                         <h4>APIキーなしで使う</h4>
-                        <p>「AI用テキストをコピー」を押すと、データプレビュー、要約統計量、分析手法、主要指標、注意点を含む文脈をコピーできます。ChatGPT、Gemini、Claudeなどに貼り付けて利用してください。</p>
+                        <p>「AI用テキストをコピー」を押すと、要約統計量、分析手法、主要指標、注意点を含む文脈をコピーできます。ChatGPT、Gemini、Claudeなどへ貼り付ける場合は、内容を確認してから利用してください。</p>
                     </div>
                     <div class="manual-card">
                         <h4>Geminiで直接生成する</h4>
@@ -576,14 +584,19 @@
                     </div>
                 </div>
                 <div class="manual-alert manual-warning">
-                    <strong>送信範囲:</strong> Google Gemini APIへ送信されるのは「解釈を生成」または追加質問を押した場合だけです。アップロードファイル全体ではなく、先頭10件のプレビュー、要約統計量、分析手法、主要指標、注意点などの要約文脈を送信します。
+                    <strong>送信範囲:</strong> Google Gemini APIへ送信されるのは「解釈を生成」または追加質問を押した場合だけです。既定では要約統計量、分析手法、主要指標、注意点を送信します。先頭10件のプレビューは設定で明示的に許可した場合だけ追加されます。
                 </div>
                 <ul>
                     <li>回帰・分類では、目的変数を選択してモデル比較結果が表示されるまでコピーできません</li>
+                    <li>送信前にパネルの「Geminiへの送信内容を確認」を開き、個人情報・機密情報がないことを確認するチェックが必要です</li>
+                    <li>プレビューを無効にしても、列名・クラス名・要約統計・分析結果は送信されます</li>
                     <li>APIキー有効時は、生成した解釈や分析文脈をもとに「この結果をレポート用に短く書くと？」のような追加質問ができます</li>
                     <li>コピー内容には、信頼性と妥当性チェック、解釈の注意点、レポート例を求める指示が含まれます</li>
                     <li>指定したGeminiモデルが利用できない場合は、既定モデルへ自動で切り替えます</li>
-                    <li>APIキーはブラウザタブ内にのみ保持され、ページを閉じると消えます</li>
+                    <li>APIキーはJavaScriptのメモリ内にだけ保持され、再読み込みまたはページを閉じると消えます</li>
+                    <li>Googleは2026年9月からStandard keyを拒否するため、<a href="https://ai.google.dev/gemini-api/docs/api-key" target="_blank" rel="noopener noreferrer">Google AI StudioのAuth key</a>を使用してください</li>
+                    <li>入力データは信頼できない文脈として区切られますが、個人情報・機密情報は送信しないでください</li>
+                    <li>生成AIの説明には誤りがあり得ます。元の指標、データ、授業資料と照合してください</li>
                 </ul>
             </section>
 
@@ -604,14 +617,18 @@
                 <span class="manual-badge">2クラス以上</span>
                 <span class="manual-badge">各クラス最低2枚</span>
                 <span class="manual-badge">JPEG / PNG / WebP</span>
+                <span class="manual-badge">1枚15 MiB以下・各クラス200枚まで</span>
                 <ol>
                     <li>クラスを追加する</li>
                     <li>各クラスに画像をアップロードする</li>
                     <li>エポック数と検証データ割合を選ぶ</li>
                     <li>学習を実行する</li>
-                    <li>評価結果、学習曲線、クラス別精度、混同行列を確認する</li>
+                    <li>層化された未学習データの評価結果、学習曲線、クラス別再現率、混同行列を確認する</li>
                     <li>新しい画像をアップロードして分類する</li>
                 </ol>
+                <div class="manual-alert manual-warning">
+                    検証データは学習曲線やモデル設定の確認にも使うため、最終的な独立テストではありません。別の撮影条件で再評価してください。
+                </div>
             </section>
 
             <section id="audio" class="manual-section">
@@ -620,35 +637,58 @@
                 <span class="manual-badge">2クラス以上</span>
                 <span class="manual-badge">各クラス2サンプル以上</span>
                 <span class="manual-badge">3秒程度のクリップ</span>
+                <span class="manual-badge">1件25 MiB・30秒以下・各クラス100件まで</span>
                 <ol>
                     <li>クラス名を入力して追加する</li>
                     <li>各クラスで録音または音声サンプルをアップロードする</li>
                     <li>学習を開始する</li>
-                    <li>評価結果、クラス別精度、混同行列を確認する</li>
+                    <li>層化された未学習データの評価結果、クラス別再現率、混同行列を確認する</li>
                     <li>新しい音声を録音またはアップロードして分類する</li>
                 </ol>
                 <div class="manual-alert manual-warning">
-                    マイク利用時はブラウザのマイク許可が必要です。周囲の雑音が多いと精度が落ちます。
+                    マイク利用時はブラウザのマイク許可が必要です。検証データは最終的な独立テストではなく、周囲の雑音や録音機器が変わると性能も変わります。
+                </div>
+            </section>
+
+            <section id="video" class="manual-section">
+                <h2><i class="fas fa-video"></i> 15. 動画・画像分析</h2>
+                <p>ローカルの動画や静止画をブラウザ内で再生・観察し、スポーツや動作を記録・比較します。</p>
+                <span class="manual-badge">動画 / 静止画</span>
+                <span class="manual-badge">描画・タグ・2画面比較</span>
+                <span class="manual-badge">MoveNetポーズ推定</span>
+                <ol>
+                    <li>動画または画像を読み込み、再生・速度・コマ送りで観察する</li>
+                    <li>線や図形を描き、動画では表示時刻と秒数を設定する</li>
+                    <li>動画の出来事をタグで記録し、CSVへ書き出す</li>
+                    <li>必要に応じて2つの動画を並べ、オフセット付きで同期比較する</li>
+                    <li>MoveNetで骨格と関節角度を推定し、結果と限界を確認する</li>
+                </ol>
+                <div class="manual-alert manual-warning">
+                    メディアは外部送信されません。アノテーションJSONは5 MiB以下で、読込時に形式と件数を検証します。ポーズ推定は遮蔽、画角、衣服、複数人により誤ることがあります。
                 </div>
             </section>
 
             <section id="reading" class="manual-section">
-                <h2><i class="fas fa-chart-bar"></i> 15. 結果の見方</h2>
+                <h2><i class="fas fa-chart-bar"></i> 16. 結果の見方</h2>
                 <ul>
-                    <li>テストスコアと交差検証スコアを両方見る</li>
-                    <li>回帰では R2 だけでなく MAE と RMSE も確認する</li>
-                    <li>分類では Accuracy だけでなく F1、Precision、Recall、混同行列を確認する</li>
+                    <li>モデル選択は前処理込み交差検証で行い、テストデータは候補確定後に一度だけ開示する</li>
+                    <li>fold間SDは信頼区間ではなく、分割による変動の目安として見る</li>
+                    <li>回帰では R2 だけでなく、目的変数と同じ単位の MAE と RMSE も確認する</li>
+                    <li>回帰の新規入力に表示される値は点予測であり、個別の将来観測に対する予測区間ではない</li>
+                    <li>分類では Accuracy だけでなく Macro F1、クラス別 Precision / Recall、混同行列を確認する</li>
                     <li>特徴量重要度は因果関係の証明ではなく、モデル解釈のヒントとして使う</li>
                     <li>欠損、外れ値、カテゴリ表記ゆれ、クラス不均衡を確認する</li>
+                    <li>カテゴリ特徴量は各訓練区画でOne-Hot Encodingされ、未知カテゴリは全0になる。未知カテゴリが多い場合はデータ収集やカテゴリ設計を見直す</li>
+                    <li>時系列、同一人物の反復測定、学校・施設などのグループ構造がある場合は、専用の時系列分割またはグループ分割を使う</li>
                 </ul>
             </section>
 
             <section id="trouble" class="manual-section">
-                <h2><i class="fas fa-triangle-exclamation"></i> 16. よくあるトラブル</h2>
+                <h2><i class="fas fa-triangle-exclamation"></i> 17. よくあるトラブル</h2>
                 <h3>ファイルが読み込めない</h3>
                 <p>拡張子、1行目の列名、空行、セル結合、装飾用の見出し行を確認してください。</p>
                 <h3>分析カードが押せない</h3>
-                <p>カードごとに必要なデータ条件があります。回帰は数値変数2つ以上、分類は数値変数1つ以上が必要です。</p>
+                <p>カードごとに必要なデータ条件があります。回帰は数値の目的変数と別の特徴量、分類は2〜20種類の値を持つ目的変数候補と別の特徴量が必要です。</p>
                 <h3>数値列が特徴量として使えない</h3>
                 <p><code>80点</code>、<code>約60</code>、<code>1,000</code>、全角数字などが混ざっていないか確認してください。</p>
                 <h3>画像・音声分類がうまく学習しない</h3>
@@ -656,7 +696,7 @@
             </section>
 
             <section id="checklist" class="manual-section">
-                <h2><i class="fas fa-list-check"></i> 17. 分析前チェックリスト</h2>
+                <h2><i class="fas fa-list-check"></i> 18. 分析前チェックリスト</h2>
                 <ul>
                     <li>目的変数を決めた</li>
                     <li>目的変数が数値なら回帰、カテゴリなら分類を選ぶと決めた</li>
@@ -665,7 +705,8 @@
                     <li>数値列に単位や文字が混ざっていない</li>
                     <li>欠損値と外れ値を確認した</li>
                     <li>クラス不均衡を確認した</li>
-                    <li>テストスコアと交差検証スコアを両方見る</li>
+                    <li>モデル選択前にテストデータを開示しない</li>
+                    <li>時系列・反復測定・グループ構造の有無を確認した</li>
                     <li>モデル保存が必要な場合はファイナライズ後に JSON をダウンロードする</li>
                 </ul>
                 <p style="margin-top: 1.5rem; color: #64748b;">最終更新: 2026-08-29</p>

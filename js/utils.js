@@ -4,13 +4,74 @@
 import { tr } from './i18n.js';
 
 /**
+ * Escape untrusted text before inserting it into an HTML template.
+ * @param {*} value
+ * @returns {string}
+ */
+export function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;');
+}
+
+/**
+ * Bind an ARIA tab set, including arrow, Home, and End key navigation.
+ * Tabs and panels are paired through aria-controls.
+ * @param {HTMLElement} root
+ * @param {{onActivate?: ((tab: HTMLElement) => void) | null}} options
+ */
+export function bindAccessibleTabs(root, { onActivate = null } = {}) {
+    const tabs = Array.from(root.querySelectorAll('[role="tab"]'));
+    if (tabs.length === 0) return;
+
+    const activate = (tab, { focus = false } = {}) => {
+        tabs.forEach(candidate => {
+            const selected = candidate === tab;
+            candidate.classList.toggle('active', selected);
+            candidate.setAttribute('aria-selected', String(selected));
+            candidate.tabIndex = selected ? 0 : -1;
+            const panelId = candidate.getAttribute('aria-controls');
+            const panel = panelId ? root.querySelector(`#${CSS.escape(panelId)}`) : null;
+            if (panel) {
+                panel.classList.toggle('active', selected);
+                panel.hidden = !selected;
+            }
+        });
+        if (focus) tab.focus();
+        if (onActivate) onActivate(tab);
+    };
+
+    tabs.forEach((tab, index) => {
+        tab.addEventListener('click', () => activate(tab));
+        tab.addEventListener('keydown', event => {
+            let nextIndex = null;
+            if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
+            if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length;
+            if (event.key === 'Home') nextIndex = 0;
+            if (event.key === 'End') nextIndex = tabs.length - 1;
+            if (nextIndex == null) return;
+            event.preventDefault();
+            activate(tabs[nextIndex], { focus: true });
+        });
+    });
+
+    activate(tabs.find(tab => tab.getAttribute('aria-selected') === 'true') || tabs[0]);
+}
+
+/**
  * Toggles the visibility of a collapsible section.
  * @param {HTMLElement} header
  */
 export function toggleCollapsible(header) {
-    header.classList.toggle('collapsed');
     const content = header.nextElementSibling;
-    content.classList.toggle('collapsed');
+    const willOpen = header.classList.contains('collapsed');
+    header.classList.toggle('collapsed', !willOpen);
+    content.classList.toggle('collapsed', !willOpen);
+    header.setAttribute('aria-expanded', String(willOpen));
+    content.hidden = !willOpen;
 }
 
 /**
@@ -52,11 +113,11 @@ export function showError(message) {
  */
 export function toHtmlTable(headers, rowLabels, data) {
     let table = '<table class="table"><thead><tr><th></th>';
-    headers.forEach(h => table += `<th>${h}</th>`);
+    headers.forEach(h => table += `<th>${escapeHtml(h)}</th>`);
     table += '</tr></thead><tbody>';
     rowLabels.forEach((r, i) => {
-        table += `<tr><th>${r}</th>`;
-        data[i].forEach(d => table += `<td>${typeof d === 'number' ? d.toFixed(4) : d}</td>`);
+        table += `<tr><th>${escapeHtml(r)}</th>`;
+        data[i].forEach(d => table += `<td>${escapeHtml(typeof d === 'number' ? d.toFixed(4) : d)}</td>`);
         table += '</tr>';
     });
     table += '</tbody></table>';
@@ -80,14 +141,14 @@ export function renderDataPreview(containerId, data, title = 'データプレビ
     let html = `<div class="table-container"><table class="table">`;
     html += '<thead data-i18n-ignore><tr>';
     html += '<th>#</th>';
-    columns.forEach(col => html += `<th>${col}</th>`);
+    columns.forEach(col => html += `<th>${escapeHtml(col)}</th>`);
     html += '</tr></thead><tbody data-i18n-ignore>';
 
     displayData.forEach((row, i) => {
         html += `<tr><td>${i + 1}</td>`;
         columns.forEach(col => {
             const val = row[col];
-            html += `<td>${val != null ? val : '<span style="color:#94a3b8;">N/A</span>'}</td>`;
+            html += `<td>${val != null ? escapeHtml(val) : '<span style="color:#94a3b8;">N/A</span>'}</td>`;
         });
         html += '</tr>';
     });
@@ -117,12 +178,14 @@ export function renderSummaryStatistics(containerId, data, characteristics, titl
     }
 
     const stats = numCols.map(col => {
-        const values = data.map(row => row[col]).filter(v => v != null && !isNaN(Number(v))).map(Number);
+        const values = data.map(row => row[col]).filter(v => v != null && Number.isFinite(Number(v))).map(Number);
         if (values.length === 0) return { col, count: 0, mean: '-', std: '-', min: '-', q1: '-', median: '-', q3: '-', max: '-', missing: data.length };
         const sorted = [...values].sort((a, b) => a - b);
         const n = values.length;
         const mean = values.reduce((a, b) => a + b, 0) / n;
-        const variance = values.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1);
+        const variance = n > 1
+            ? values.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1)
+            : 0;
         const std = Math.sqrt(variance);
         const q1 = sorted[Math.floor(n * 0.25)];
         const median = sorted[Math.floor(n * 0.5)];
@@ -135,7 +198,7 @@ export function renderSummaryStatistics(containerId, data, characteristics, titl
     html += '<thead><tr><th>変数</th><th>件数</th><th>平均</th><th>標準偏差</th><th>最小</th><th>Q1</th><th>中央値</th><th>Q3</th><th>最大</th><th>欠損</th></tr></thead><tbody>';
     stats.forEach(s => {
         const fmt = v => typeof v === 'number' ? v.toFixed(3) : v;
-        html += `<tr><td><strong data-i18n-ignore>${s.col}</strong></td><td>${s.count}</td><td>${fmt(s.mean)}</td><td>${fmt(s.std)}</td><td>${fmt(s.min)}</td><td>${fmt(s.q1)}</td><td>${fmt(s.median)}</td><td>${fmt(s.q3)}</td><td>${fmt(s.max)}</td><td>${s.missing}</td></tr>`;
+        html += `<tr><td><strong data-i18n-ignore>${escapeHtml(s.col)}</strong></td><td>${s.count}</td><td>${fmt(s.mean)}</td><td>${fmt(s.std)}</td><td>${fmt(s.min)}</td><td>${fmt(s.q1)}</td><td>${fmt(s.median)}</td><td>${fmt(s.q3)}</td><td>${fmt(s.max)}</td><td>${s.missing}</td></tr>`;
     });
     html += '</tbody></table></div>';
     container.innerHTML = html;
@@ -149,9 +212,9 @@ export function renderSummaryStatistics(containerId, data, characteristics, titl
  * @returns {string}
  */
 export function createSelect(id, options, placeholder = '選択してください') {
-    let html = `<select id="${id}" class="form-select">`;
-    html += `<option value="">${placeholder}</option>`;
-    options.forEach(opt => html += `<option value="${opt}" data-i18n-ignore>${opt}</option>`);
+    let html = `<select id="${escapeHtml(id)}" class="form-select">`;
+    html += `<option value="">${escapeHtml(placeholder)}</option>`;
+    options.forEach(opt => html += `<option value="${escapeHtml(opt)}" data-i18n-ignore>${escapeHtml(opt)}</option>`);
     html += '</select>';
     return html;
 }
@@ -167,9 +230,9 @@ export function createVariableChips(name, options, selected = []) {
     let html = '<div class="variable-chips">';
     options.forEach(opt => {
         const isSelected = selected.includes(opt);
-        html += `<label class="variable-chip ${isSelected ? 'selected' : ''}" data-name="${name}" data-value="${opt}">
-            <input type="checkbox" name="${name}" value="${opt}" ${isSelected ? 'checked' : ''} style="display:none;">
-            <span data-i18n-ignore>${opt}</span>
+        html += `<label class="variable-chip ${isSelected ? 'selected' : ''}" data-name="${escapeHtml(name)}" data-value="${escapeHtml(opt)}">
+            <input type="checkbox" name="${escapeHtml(name)}" value="${escapeHtml(opt)}" ${isSelected ? 'checked' : ''} style="display:none;">
+            <span data-i18n-ignore>${escapeHtml(opt)}</span>
         </label>`;
     });
     html += '</div>';
@@ -755,9 +818,13 @@ export function renderROCCurve(containerId, yTrue, yProba, auc) {
  */
 export function toCSV(headers, rows) {
     const escape = (val) => {
-        const s = val == null ? '' : String(val);
-        return s.includes(',') || s.includes('"') || s.includes('\n')
-            ? `"${s.replace(/"/g, '""')}"` : s;
+        let s = val == null ? '' : String(val);
+        const trimmed = s.trim();
+        const isPlainNumber = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(trimmed);
+        if (!isPlainNumber && /^[=+\-@\t\r\n＝＋－＠]/.test(s)) {
+            s = `\t${s}`;
+        }
+        return `"${s.replace(/"/g, '""')}"`;
     };
     const lines = [headers.map(escape).join(',')];
     for (const row of rows) {
@@ -843,6 +910,22 @@ export function downloadJSON(data, filename) {
  */
 function serializeTree(node) {
     if (!node) return null;
+    if (node.leaf !== undefined) {
+        if (node.leaf) {
+            return {
+                leaf: true,
+                classDist: { ...node.classDist },
+                prediction: node.prediction
+            };
+        }
+        return {
+            leaf: false,
+            featureIdx: node.featureIdx,
+            threshold: node.threshold,
+            left: serializeTree(node.left),
+            right: serializeTree(node.right)
+        };
+    }
     if (node.value !== undefined && node.left === undefined) {
         // Leaf node
         return { value: node.value, classCounts: node.classCounts || undefined };
@@ -868,6 +951,7 @@ function serializeEncoders(encodersMap) {
     for (const [colIndex, encoder] of encodersMap) {
         result.push({
             columnIndex: colIndex,
+            type: encoder.constructor?.name || 'LabelEncoder',
             classes: encoder._classes ? [...encoder._classes] : encoder.classes ? [...encoder.classes] : []
         });
     }
@@ -878,9 +962,10 @@ function serializeEncoders(encodersMap) {
  * Extract model-specific parameters for serialization.
  * @param {Object} model - Trained model instance
  * @param {string} modelType - Badge/type identifier
+ * @param {'regression'|'classification'} taskType - Analysis task type
  * @returns {Object}
  */
-function serializeModelParams(model, modelType) {
+function serializeModelParams(model, modelType, taskType) {
     const params = model.getParams ? model.getParams() : {};
 
     switch (modelType) {
@@ -900,7 +985,7 @@ function serializeModelParams(model, modelType) {
                 minSamplesSplit: model.minSamplesSplit,
                 minSamplesLeaf: model.minSamplesLeaf,
                 nFeatures: model.nFeatures,
-                nClasses: model.nClasses
+                classes: model.classes ? [...model.classes] : null
             };
         case 'RF':
             return {
@@ -908,23 +993,46 @@ function serializeModelParams(model, modelType) {
                     tree: serializeTree(t.tree),
                     featureIndices: t.featureIndices ? [...t.featureIndices] : null,
                     maxDepth: t.maxDepth,
-                    nClasses: t.nClasses
+                    classes: t.classes ? [...t.classes] : null
                 })) : [],
                 nEstimators: model.nEstimators,
                 maxDepth: model.maxDepth,
                 maxFeatures: model.maxFeatures,
                 nFeatures: model.nFeatures,
-                nClasses: model.nClasses
+                classes: model.classes ? [...model.classes] : null
             };
         case 'KNN':
             return {
-                XTrain: model.XTrain ? model.XTrain.map(r => [...r]) : null,
-                yTrain: model.yTrain ? [...model.yTrain] : null,
+                XTrain: (model.XTrain || model._X) ? (model.XTrain || model._X).map(r => [...r]) : null,
+                yTrain: (model.yTrain || model._y) ? [...(model.yTrain || model._y)] : null,
                 nNeighbors: model.nNeighbors,
                 weights: model.weights,
-                nClasses: model.nClasses
+                nFeatures: model.nFeatures,
+                classes: model.classes ? [...model.classes] : null
             };
         case 'GBM':
+            if (taskType === 'classification') {
+                return {
+                    models: model.models ? model.models.map(binaryModel => ({
+                        initPred: binaryModel.initPred,
+                        trees: binaryModel.trees.map(tree => ({
+                            tree: serializeTree(tree.tree),
+                            maxDepth: tree.maxDepth,
+                            minSamplesSplit: tree.minSamplesSplit,
+                            minSamplesLeaf: tree.minSamplesLeaf,
+                            nFeatures: tree.nFeatures
+                        }))
+                    })) : [],
+                    classes: model.classes ? [...model.classes] : null,
+                    initialPredictions: model.initialPredictions ? [...model.initialPredictions] : null,
+                    learningRate: model.learningRate,
+                    nEstimators: model.nEstimators,
+                    maxDepth: model.maxDepth,
+                    subsample: model.subsample,
+                    randomState: model.randomState,
+                    nFeatures: model.nFeatures
+                };
+            }
             return {
                 trees: model.trees ? model.trees.map(t => ({
                     tree: serializeTree(t.tree),
@@ -939,32 +1047,35 @@ function serializeModelParams(model, modelType) {
             };
         case 'LR':
             return {
-                weights: model.weights ? model.weights.map(w => ({
-                    w: [...w.w],
-                    b: w.b
-                })) : null,
+                weights: model.weights ? model.weights.map(w => [...w]) : null,
                 classes: model.classes ? [...model.classes] : null,
+                nFeatures: model.nFeatures,
+                learningRate: model.learningRate,
                 maxIter: model.maxIter,
-                nClasses: model.nClasses
+                tol: model.tol,
+                C: model.C
             };
         case 'NB':
             return {
-                classPriors: model.classPriors ? [...model.classPriors] : null,
-                means: model.means ? model.means.map(r => [...r]) : null,
-                variances: model.variances ? model.variances.map(r => [...r]) : null,
+                classPriors: model.classPriors ? { ...model.classPriors } : null,
+                classMeans: model.classMeans ? Object.fromEntries(
+                    Object.entries(model.classMeans).map(([cls, values]) => [cls, [...values]])
+                ) : null,
+                classVars: model.classVars ? Object.fromEntries(
+                    Object.entries(model.classVars).map(([cls, values]) => [cls, [...values]])
+                ) : null,
                 classes: model.classes ? [...model.classes] : null,
-                nClasses: model.nClasses
+                nFeatures: model.nFeatures
             };
         case 'SVM':
             return {
-                weights: model.weights ? model.weights.map(w => ({
-                    w: [...w.w],
-                    b: w.b
-                })) : null,
+                weights: model.weights ? model.weights.map(w => [...w]) : null,
                 classes: model.classes ? [...model.classes] : null,
+                nFeatures: model.nFeatures,
                 C: model.C,
+                learningRate: model.learningRate,
                 maxIter: model.maxIter,
-                nClasses: model.nClasses
+                randomState: model.randomState
             };
         default:
             return params;
@@ -980,17 +1091,18 @@ function serializeModelParams(model, modelType) {
 export function serializeModel(modelObj, metadata) {
     const now = new Date();
     return {
-        version: '1.0',
+        version: '1.2',
         appName: 'easyDataScience',
         exportDate: now.toISOString(),
         taskType: metadata.taskType,
         targetCol: metadata.targetCol,
         featureNames: [...metadata.featureNames],
+        inputFeatureNames: [...(metadata.inputFeatureNames || metadata.featureNames)],
         classLabels: metadata.classLabels ? [...metadata.classLabels] : null,
         modelInfo: {
             name: modelObj.name,
             badge: modelObj.badge,
-            params: serializeModelParams(modelObj.model, modelObj.badge)
+            params: serializeModelParams(modelObj.model, modelObj.badge, metadata.taskType)
         },
         preprocessing: {
             scaler: metadata.scaler ? {
@@ -1001,6 +1113,7 @@ export function serializeModel(modelObj, metadata) {
                 maxs: metadata.scaler.maxs ? [...metadata.scaler.maxs] : null
             } : null,
             encoders: serializeEncoders(metadata.encoders),
+            pipeline: metadata.pipelineSpec ? JSON.parse(JSON.stringify(metadata.pipelineSpec)) : null,
             labelEncoder: metadata.labelEncoder ? {
                 classes: [...metadata.labelEncoder._classes]
             } : null
@@ -1017,10 +1130,146 @@ export function serializeModel(modelObj, metadata) {
  */
 export function deserializeModel(jsonData) {
     const data = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
-    if (!data.version) throw new Error('無効なモデルファイル: バージョン情報がありません');
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        throw new Error('無効なモデルファイル: JSONオブジェクトではありません');
+    }
+    if (!['1.1', '1.2'].includes(String(data.version))) {
+        throw new Error('無効なモデルファイル: 未対応のバージョンです');
+    }
     if (data.appName !== 'easyDataScience') throw new Error('無効なモデルファイル: easyDataScienceで作成されたファイルではありません');
-    if (!data.modelInfo || !data.featureNames) throw new Error('無効なモデルファイル: モデル情報が不足しています');
+    if (!['regression', 'classification'].includes(data.taskType)) {
+        throw new Error('無効なモデルファイル: タスク種別が不正です');
+    }
+    const validBadges = new Set(['Linear', 'Ridge', 'Lasso', 'Tree', 'RF', 'KNN', 'GBM', 'LR', 'NB', 'SVM']);
+    if (!data.modelInfo || typeof data.modelInfo !== 'object' || !validBadges.has(data.modelInfo.badge)) {
+        throw new Error('無効なモデルファイル: モデル情報が不正です');
+    }
+    if (!data.modelInfo.params || typeof data.modelInfo.params !== 'object') {
+        throw new Error('無効なモデルファイル: モデルパラメータがありません');
+    }
+    if (!Array.isArray(data.featureNames) || data.featureNames.length === 0 || data.featureNames.length > 10000 ||
+        data.featureNames.some(name => typeof name !== 'string' || name.length === 0 || name.length > 200)) {
+        throw new Error('無効なモデルファイル: 特徴量情報が不正です');
+    }
+    if (data.inputFeatureNames != null && (!Array.isArray(data.inputFeatureNames) ||
+        data.inputFeatureNames.length === 0 || data.inputFeatureNames.length > 10000 ||
+        data.inputFeatureNames.some(name => typeof name !== 'string' || name.length === 0 || name.length > 200))) {
+        throw new Error('無効なモデルファイル: 入力特徴量情報が不正です');
+    }
+    if (typeof data.targetCol !== 'string' || data.targetCol.length > 200) {
+        throw new Error('無効なモデルファイル: 目的変数情報が不正です');
+    }
+    const pipeline = data.preprocessing?.pipeline;
+    if (pipeline != null) {
+        if (!Array.isArray(pipeline.inputFeatureNames) || !Array.isArray(pipeline.outputFeatureNames) ||
+            !Array.isArray(pipeline.featureSpecs) || !Array.isArray(pipeline.outputFeatures) ||
+            pipeline.outputFeatureNames.length !== data.featureNames.length ||
+            pipeline.outputFeatures.length !== data.featureNames.length) {
+            throw new Error('無効なモデルファイル: 前処理パイプラインが不正です');
+        }
+        for (const def of pipeline.outputFeatures) {
+            if (!def || typeof def.sourceName !== 'string' || !['numeric', 'onehot'].includes(def.type)) {
+                throw new Error('無効なモデルファイル: 前処理の特徴量定義が不正です');
+            }
+            if (def.type === 'numeric' && !Number.isFinite(Number(def.fillValue))) {
+                throw new Error('無効なモデルファイル: 数値補完値が不正です');
+            }
+        }
+    }
+    validateSerializedModelParameters(data);
     return data;
+}
+
+function validateSerializedModelParameters(data) {
+    const { badge, params } = data.modelInfo;
+    const featureCount = data.featureNames.length;
+    const allowedByTask = data.taskType === 'regression'
+        ? new Set(['Linear', 'Ridge', 'Lasso', 'Tree', 'RF', 'KNN', 'GBM'])
+        : new Set(['Tree', 'RF', 'KNN', 'GBM', 'LR', 'NB', 'SVM']);
+    if (!allowedByTask.has(badge)) {
+        throw new Error('無効なモデルファイル: タスク種別とモデルが一致しません');
+    }
+
+    const finiteVector = (values, expectedLength, label) => {
+        if (!Array.isArray(values) || values.length !== expectedLength || values.some(value => !Number.isFinite(value))) {
+            throw new Error(`無効なモデルファイル: ${label}の次元または値が不正です`);
+        }
+    };
+    const validateClasses = () => {
+        if (!Array.isArray(params.classes) || params.classes.length < 2 || params.classes.length > 1000 ||
+            params.classes.some(value => !['string', 'number', 'boolean'].includes(typeof value))) {
+            throw new Error('無効なモデルファイル: クラス情報が不正です');
+        }
+    };
+
+    if (['Linear', 'Ridge', 'Lasso'].includes(badge)) {
+        finiteVector(params.coefficients, featureCount, '係数');
+        if (!Number.isFinite(params.intercept)) throw new Error('無効なモデルファイル: 切片が不正です');
+    }
+
+    if (badge === 'LR' || badge === 'SVM') {
+        validateClasses();
+        if (!Array.isArray(params.weights) || params.weights.length === 0 || params.weights.length > params.classes.length) {
+            throw new Error('無効なモデルファイル: 重み情報が不正です');
+        }
+        params.weights.forEach((weights, index) => {
+            const vector = Array.isArray(weights) ? weights : [...(weights?.w || []), weights?.b];
+            finiteVector(vector, featureCount + 1, `重み${index + 1}`);
+        });
+    }
+
+    if (badge === 'KNN') {
+        if (!Array.isArray(params.XTrain) || params.XTrain.length === 0 || params.XTrain.length > 100000 ||
+            !Array.isArray(params.yTrain) || params.XTrain.length !== params.yTrain.length) {
+            throw new Error('無効なモデルファイル: KNN学習データが不正です');
+        }
+        params.XTrain.forEach((row, index) => finiteVector(row, featureCount, `KNN学習行${index + 1}`));
+        if (data.taskType === 'regression' && params.yTrain.some(value => !Number.isFinite(value))) {
+            throw new Error('無効なモデルファイル: KNN目的変数が不正です');
+        }
+        if (data.taskType === 'classification') validateClasses();
+    }
+
+    if (badge === 'NB') {
+        validateClasses();
+        if (!params.classPriors || !params.classMeans || !params.classVars) {
+            throw new Error('無効なモデルファイル: Naive Bayes統計量がありません');
+        }
+        params.classes.forEach(cls => {
+            const key = String(cls);
+            if (!Number.isFinite(params.classPriors[key]) || params.classPriors[key] < 0 || params.classPriors[key] > 1) {
+                throw new Error('無効なモデルファイル: Naive Bayes事前確率が不正です');
+            }
+            finiteVector(params.classMeans[key], featureCount, `クラス${key}の平均`);
+            finiteVector(params.classVars[key], featureCount, `クラス${key}の分散`);
+            if (params.classVars[key].some(value => value < 0)) {
+                throw new Error('無効なモデルファイル: Naive Bayes分散が不正です');
+            }
+        });
+    }
+
+    if (badge === 'GBM' && data.taskType === 'classification') {
+        validateClasses();
+        const expectedModels = params.classes.length === 2 ? 1 : params.classes.length;
+        if (!Array.isArray(params.models) || params.models.length !== expectedModels ||
+            params.models.some(model => !Number.isFinite(model?.initPred) || !Array.isArray(model?.trees))) {
+            throw new Error('無効なモデルファイル: 分類GBMの構造が不正です');
+        }
+    }
+
+    const scaler = data.preprocessing?.scaler;
+    if (scaler) {
+        if (scaler.type === 'StandardScaler') {
+            finiteVector(scaler.means, featureCount, '標準化平均');
+            finiteVector(scaler.stds, featureCount, '標準化標準偏差');
+            if (scaler.stds.some(value => value <= 0)) throw new Error('無効なモデルファイル: 標準偏差が不正です');
+        } else if (scaler.type === 'MinMaxScaler') {
+            finiteVector(scaler.mins, featureCount, '最小値');
+            finiteVector(scaler.maxs, featureCount, '最大値');
+        } else {
+            throw new Error('無効なモデルファイル: 未対応のスケーラーです');
+        }
+    }
 }
 
 /**

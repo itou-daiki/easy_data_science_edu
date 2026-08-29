@@ -1,6 +1,6 @@
 /**
  * Linear Regression using Ordinary Least Squares (OLS).
- * Computes coefficients via the normal equation: beta = (X^T X)^(-1) X^T y
+ * Computes a least-squares solution with the Moore-Penrose pseudoinverse.
  * @module regression/linear
  */
 
@@ -22,7 +22,7 @@ export class LinearRegression {
     }
 
     /**
-     * Fit the model using the normal equation.
+     * Fit the model using a pseudoinverse least-squares solution.
      * @param {number[][]} X - 2D array of shape [nSamples, nFeatures].
      * @param {number[]}   y - 1D array of shape [nSamples].
      * @returns {LinearRegression} The fitted model instance.
@@ -43,14 +43,13 @@ export class LinearRegression {
         const Xm = math.matrix(XWithIntercept);
         const ym = math.matrix(y);
 
-        // beta = (X^T X)^(-1) X^T y
-        const Xt = math.transpose(Xm);
-        const XtX = math.multiply(Xt, Xm);
-        const XtXInv = math.inv(XtX);
-        const Xty = math.multiply(Xt, ym);
-        const beta = math.multiply(XtXInv, Xty);
+        // The pseudoinverse remains defined for duplicated columns and p >= n.
+        const beta = math.multiply(math.pinv(Xm), ym);
 
         const betaArray = math.flatten(beta).toArray();
+        if (betaArray.some(value => !Number.isFinite(value))) {
+            throw new Error('LinearRegression.fit: finite coefficients could not be computed.');
+        }
         this.intercept = betaArray[0];
         this.coefficients = betaArray.slice(1);
 

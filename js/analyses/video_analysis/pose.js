@@ -73,6 +73,16 @@ export async function ensurePoseDetector() {
     return _detectorPromise;
 }
 
+export async function disposePoseDetector() {
+    if (!_detectorPromise) return;
+    try {
+        const detector = await _detectorPromise;
+        if (detector?.dispose) detector.dispose();
+    } finally {
+        _detectorPromise = null;
+    }
+}
+
 function _isMediaReady(media) {
     if (!media) return false;
     if (media.tagName === 'VIDEO') return media.readyState >= 2;

@@ -2,8 +2,6 @@
  * model_selection.js - Train/test splitting, cross-validation, and grid search
  *
  * All functions are pure where feasible: input arrays are never mutated.
- * Depends on globally available `math` (math.js) and `jStat`.
- *
  * @module model_selection
  */
 
@@ -356,6 +354,74 @@ export class StratifiedKFold {
   }
 }
 
+/** K-fold iterator that keeps every group wholly in one validation fold. */
+export class GroupKFold {
+  constructor({ nSplits = 5, shuffle = true, randomState = 42 } = {}) {
+    if (nSplits < 2) throw new Error('GroupKFold: nSplits must be >= 2');
+    this.nSplits = nSplits;
+    this.shuffle = shuffle;
+    this.randomState = randomState;
+  }
+
+  *split(X, groups) {
+    if (!Array.isArray(X) || !Array.isArray(groups) || X.length === 0 || X.length !== groups.length) {
+      throw new Error('GroupKFold.split: X and groups must have the same non-zero length');
+    }
+    const byGroup = new Map();
+    groups.forEach((group, index) => {
+      if (group == null || (typeof group === 'string' && group.trim() === '')) {
+        throw new Error('GroupKFold.split: groups must not contain missing values');
+      }
+      if (!byGroup.has(group)) byGroup.set(group, []);
+      byGroup.get(group).push(index);
+    });
+    if (byGroup.size < this.nSplits) {
+      throw new Error(`GroupKFold.split: ${this.nSplits} folds require at least ${this.nSplits} distinct groups`);
+    }
+    const rng = _createRng(this.randomState);
+    let grouped = [...byGroup.entries()];
+    if (this.shuffle) grouped = _shuffle(grouped, rng);
+    grouped.sort((a, b) => b[1].length - a[1].length);
+    const foldGroups = Array.from({ length: this.nSplits }, () => []);
+    const foldSizes = Array(this.nSplits).fill(0);
+    for (const entry of grouped) {
+      const smallestFold = foldSizes.indexOf(Math.min(...foldSizes));
+      foldGroups[smallestFold].push(entry);
+      foldSizes[smallestFold] += entry[1].length;
+    }
+    const allIndices = Array.from({ length: X.length }, (_, index) => index);
+    for (const fold of foldGroups) {
+      const testSet = new Set(fold.flatMap(([, indices]) => indices));
+      yield [allIndices.filter(index => !testSet.has(index)), [...testSet]];
+    }
+  }
+}
+
+/** Expanding-window split for already time-ordered rows. */
+export class TimeSeriesSplit {
+  constructor({ nSplits = 5, gap = 0 } = {}) {
+    if (nSplits < 2) throw new Error('TimeSeriesSplit: nSplits must be >= 2');
+    if (!Number.isInteger(gap) || gap < 0) throw new Error('TimeSeriesSplit: gap must be a non-negative integer');
+    this.nSplits = nSplits;
+    this.gap = gap;
+  }
+
+  *split(X) {
+    if (!Array.isArray(X) || X.length === 0) throw new Error('TimeSeriesSplit.split: X must be a non-empty array');
+    const testSize = Math.floor(X.length / (this.nSplits + 1));
+    if (testSize < 1) throw new Error('TimeSeriesSplit.split: too few samples for the requested folds');
+    const firstTestStart = X.length - this.nSplits * testSize;
+    for (let splitIndex = 0; splitIndex < this.nSplits; splitIndex++) {
+      const testStart = firstTestStart + splitIndex * testSize;
+      const trainEnd = testStart - this.gap;
+      if (trainEnd < 2) throw new Error('TimeSeriesSplit.split: the first training window is too small after applying gap');
+      const trainIdx = Array.from({ length: trainEnd }, (_, index) => index);
+      const testIdx = Array.from({ length: testSize }, (_, index) => testStart + index);
+      yield [trainIdx, testIdx];
+    }
+  }
+}
+
 // ===========================================================================
 // crossValidate
 // ===========================================================================
@@ -391,6 +457,7 @@ export function crossValidate(model, X, y, options = {}) {
 
   const scores = [];
   const folds = stratified ? splitter.split(X, y) : splitter.split(X);
+  let foldIndex = 0;
   for (const [trainIdx, testIdx] of folds) {
     const XTrain = _selectByIndices(X, trainIdx);
     const yTrain = _selectByIndices(y, trainIdx);
@@ -522,23 +589,31 @@ export function crossValidateWithPreprocessing(ModelClass, rawRows, targetCol, o
     stratified = false,
     task = stratified ? 'classification' : 'regression',
     randomState = 42,
+    splitStrategy = 'random',
+    splitColumn = null,
+    splitGap = 0,
   } = options;
 
   if (typeof ModelClass !== 'function') {
     throw new Error('crossValidateWithPreprocessing: ModelClass must be a constructor function');
   }
-  const rows = _filterModelRows(rawRows, targetCol, task);
+  let rows = _filterModelRows(rawRows, targetCol, task);
+  rows = _sortRowsForSplit(rows, splitStrategy, splitColumn);
   if (rows.length === 0) {
     throw new Error('crossValidateWithPreprocessing: no valid rows');
   }
 
-  const yForSplit = rows.map(row => row[targetCol]);
-  const splitter = stratified
-    ? new StratifiedKFold({ nSplits: cv, shuffle: true, randomState })
-    : new KFold({ nSplits: cv, shuffle: true, randomState });
-  const folds = stratified ? splitter.split(rows, yForSplit) : splitter.split(rows);
+  const folds = _createRawRowFolds(rows, targetCol, {
+    cv,
+    stratified,
+    randomState,
+    splitStrategy,
+    splitColumn,
+    splitGap,
+  });
   const scorer = _getScorer(scoring);
   const scores = [];
+  let foldIndex = 0;
 
   for (const [trainIdx, testIdx] of folds) {
     const trainRows = _selectByIndices(rows, trainIdx);
@@ -550,10 +625,15 @@ export function crossValidateWithPreprocessing(ModelClass, rawRows, targetCol, o
       { ...options, task }
     );
 
-    const model = new ModelClass(params);
+    const model = new ModelClass({ randomState: randomState + foldIndex, ...params });
     model.fit(XTrain, yTrain);
     const yPred = model.predict(XTest);
-    scores.push(scorer(yTest, yPred));
+    const score = scorer(yTest, yPred);
+    if (!Number.isFinite(score)) {
+      throw new Error(`crossValidateWithPreprocessing: fold ${foldIndex + 1} produced an undefined score`);
+    }
+    scores.push(score);
+    foldIndex++;
   }
 
   return scores;
@@ -617,11 +697,67 @@ function _filterModelRows(rawRows, targetCol, task) {
   }
   return rawRows.filter(row => {
     const value = row?.[targetCol];
-    if (value == null || Number.isNaN(value) || (typeof value === 'string' && value.trim() === '')) {
+    if (value == null || (typeof value === 'number' && !Number.isFinite(value)) || (typeof value === 'string' && value.trim() === '')) {
       return false;
     }
-    return task !== 'regression' || !Number.isNaN(Number(value));
+    return task !== 'regression' || Number.isFinite(Number(value));
   });
+}
+
+function _sortRowsForSplit(rows, splitStrategy, splitColumn) {
+  if (splitStrategy !== 'time') return rows;
+  if (!splitColumn) throw new Error('時系列CVには時刻列を指定してください。');
+  const withOrder = rows.map((row, index) => {
+    const value = row[splitColumn];
+    const numeric = value != null && String(value).trim() !== '' && Number.isFinite(Number(value));
+    const order = numeric ? Number(value) : Date.parse(String(value));
+    return { row, index, order };
+  });
+  if (withOrder.some(item => !Number.isFinite(item.order))) {
+    throw new Error(`時刻列「${splitColumn}」に解釈できない値または欠損があります。`);
+  }
+  return withOrder.sort((a, b) => a.order - b.order || a.index - b.index).map(item => item.row);
+}
+
+function _createRawRowFolds(rows, targetCol, options) {
+  const { cv, stratified, randomState, splitStrategy, splitColumn, splitGap } = options;
+  if (splitStrategy === 'group') {
+    if (!splitColumn) throw new Error('グループCVにはグループ列を指定してください。');
+    const groups = rows.map(row => row[splitColumn]);
+    return new GroupKFold({ nSplits: cv, shuffle: true, randomState }).split(rows, groups);
+  }
+  if (splitStrategy === 'time') {
+    return new TimeSeriesSplit({ nSplits: cv, gap: Math.max(0, Math.floor(Number(splitGap) || 0)) }).split(rows);
+  }
+  if (splitStrategy !== 'random') throw new Error(`未知の分割方法です: ${splitStrategy}`);
+  const yForSplit = rows.map(row => row[targetCol]);
+  const splitter = stratified
+    ? new StratifiedKFold({ nSplits: cv, shuffle: true, randomState })
+    : new KFold({ nSplits: cv, shuffle: true, randomState });
+  return stratified ? splitter.split(rows, yForSplit) : splitter.split(rows);
+}
+
+function _subsampleTrainingRows(rows, targetCol, requestedSize, stratified, rng) {
+  const size = Math.min(rows.length, Math.max(2, requestedSize));
+  if (!stratified) return _shuffle(rows, rng).slice(0, size);
+
+  const groups = new Map();
+  for (const row of rows) {
+    const label = row[targetCol];
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(row);
+  }
+  if (size < groups.size) return null;
+
+  const selected = [];
+  const remainder = [];
+  for (const group of groups.values()) {
+    const shuffled = _shuffle(group, rng);
+    selected.push(shuffled[0]);
+    remainder.push(...shuffled.slice(1));
+  }
+  selected.push(..._shuffle(remainder, rng).slice(0, size - selected.length));
+  return _shuffle(selected, rng);
 }
 
 /**
@@ -786,4 +922,95 @@ export function learningCurve(ModelClass, params, X, y, options = {}) {
   }
 
   return { trainSizes: actualSizes, trainScoresMean, trainScoresStd, testScoresMean, testScoresStd };
+}
+
+/**
+ * Compute a learning curve while fitting preprocessing inside every fold and
+ * every training-size subset.
+ *
+ * @param {Function} ModelClass
+ * @param {Object} params
+ * @param {Object[]} rawRows
+ * @param {string} targetCol
+ * @param {Object} [options]
+ * @returns {{ trainSizes: number[], trainScoresMean: number[], trainScoresStd: number[], testScoresMean: number[], testScoresStd: number[] }}
+ */
+export function learningCurveWithPreprocessing(ModelClass, params, rawRows, targetCol, options = {}) {
+  const {
+    trainSizes = [0.1, 0.3, 0.5, 0.7, 0.9, 1.0],
+    cv = 3,
+    scoring = 'r2',
+    stratified = false,
+    task = stratified ? 'classification' : 'regression',
+    randomState = 42,
+    splitStrategy = 'random',
+    splitColumn = null,
+    splitGap = 0,
+  } = options;
+  let rows = _filterModelRows(rawRows, targetCol, task);
+  rows = _sortRowsForSplit(rows, splitStrategy, splitColumn);
+  const folds = [..._createRawRowFolds(rows, targetCol, {
+    cv,
+    stratified,
+    randomState,
+    splitStrategy,
+    splitColumn,
+    splitGap,
+  })];
+  const scorer = _getScorer(scoring);
+  const rng = _createRng(randomState);
+  const result = {
+    trainSizes: [],
+    trainScoresMean: [],
+    trainScoresStd: [],
+    testScoresMean: [],
+    testScoresStd: [],
+  };
+
+  for (const sizeFraction of trainSizes) {
+    const trainScores = [];
+    const testScores = [];
+    const usedSizes = [];
+    for (let foldIndex = 0; foldIndex < folds.length; foldIndex++) {
+      const [trainIdx, testIdx] = folds[foldIndex];
+      const fullTrainRows = _selectByIndices(rows, trainIdx);
+      const validationRows = _selectByIndices(rows, testIdx);
+      const minimumSize = stratified ? new Set(fullTrainRows.map(row => row[targetCol])).size : 2;
+      const requestedSize = Math.max(minimumSize, Math.round(fullTrainRows.length * sizeFraction));
+      const subset = splitStrategy === 'time'
+        ? fullTrainRows.slice(Math.max(0, fullTrainRows.length - requestedSize))
+        : _subsampleTrainingRows(fullTrainRows, targetCol, requestedSize, stratified, rng);
+      if (!subset) continue;
+
+      const { XTrain, XTest, yTrain, yTest } = prepareTrainValidationFeatures(
+        subset,
+        validationRows,
+        targetCol,
+        { ...options, task }
+      );
+      const model = new ModelClass({ randomState: randomState + foldIndex, ...params });
+      model.fit(XTrain, yTrain);
+      const trainScore = scorer(yTrain, model.predict(XTrain));
+      const testScore = scorer(yTest, model.predict(XTest));
+      if (Number.isFinite(trainScore) && Number.isFinite(testScore)) {
+        trainScores.push(trainScore);
+        testScores.push(testScore);
+        usedSizes.push(XTrain.length);
+      }
+    }
+
+    if (trainScores.length === 0) continue;
+    const trainMean = trainScores.reduce((sum, value) => sum + value, 0) / trainScores.length;
+    const testMean = testScores.reduce((sum, value) => sum + value, 0) / testScores.length;
+    result.trainSizes.push(Math.round(usedSizes.reduce((sum, value) => sum + value, 0) / usedSizes.length));
+    result.trainScoresMean.push(trainMean);
+    result.trainScoresStd.push(Math.sqrt(trainScores.reduce((sum, value) => sum + (value - trainMean) ** 2, 0) / trainScores.length));
+    result.testScoresMean.push(testMean);
+    result.testScoresStd.push(Math.sqrt(testScores.reduce((sum, value) => sum + (value - testMean) ** 2, 0) / testScores.length));
+  }
+
+  if (result.trainSizes.length === 0) {
+    throw new Error('learningCurveWithPreprocessing: no valid learning-curve points');
+  }
+  return result;
 }

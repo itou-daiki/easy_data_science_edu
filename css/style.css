@@ -58,7 +58,7 @@ body {
     content: ''; position: absolute; top: -50%; right: -50%;
     width: 200%; height: 200%;
     background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
-    animation: pulse 4s ease-in-out infinite;
+    animation: pulse 4s ease-in-out infinite; pointer-events: none;
 }
 @keyframes pulse {
     0%, 100% { transform: scale(1); opacity: 0.5; }
@@ -105,6 +105,13 @@ body {
     border-color: var(--primary-color);
 }
 .feature-card:hover::before { transform: translateX(0); }
+.feature-card:focus-visible,
+button:focus-visible,
+a:focus-visible,
+.collapsible-header:focus-visible {
+    outline: 3px solid #f59e0b;
+    outline-offset: 3px;
+}
 .feature-card.disabled {
     opacity: 0.5; cursor: not-allowed; background: #f5f5f5; pointer-events: none;
 }
@@ -418,8 +425,12 @@ table tr:hover { background: var(--background); }
 }
 
 /* === Tabs === */
-.tab-container { display: flex; gap: 0.5rem; margin-bottom: 2rem; border-bottom: 2px solid var(--border-color); }
+.tab-container {
+    display: flex; gap: 0.5rem; max-width: 100%; overflow-x: auto;
+    margin-bottom: 2rem; border-bottom: 2px solid var(--border-color);
+}
 .tab-btn {
+    flex: 0 0 auto;
     padding: 0.75rem 1.5rem; background: transparent; border: none;
     border-bottom: 3px solid transparent; font-weight: 600;
     color: var(--text-secondary); cursor: pointer; transition: all 0.2s;
@@ -457,8 +468,30 @@ table tr:hover { background: var(--background); }
     margin: 0; color: var(--text-primary); font-size: 1.5rem;
     display: flex; align-items: center; gap: 0.75rem;
 }
-.close-modal { color: #64748b; font-size: 2rem; font-weight: bold; cursor: pointer; line-height: 1; transition: color 0.2s; }
+.close-modal { color: #64748b; font-size: 2rem; font-weight: bold; cursor: pointer; line-height: 1; transition: color 0.2s; border: 0; background: transparent; padding: 0.25rem; }
 .close-modal:hover, .close-modal:focus { color: var(--text-primary); text-decoration: none; }
+
+.skip-link {
+    position: fixed;
+    top: 0.5rem;
+    left: 0.5rem;
+    z-index: 10000;
+    transform: translateY(-150%);
+    background: #ffffff;
+    color: #111827;
+    padding: 0.65rem 0.9rem;
+    border: 2px solid #111827;
+}
+.skip-link:focus { transform: translateY(0); }
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
 
 /* === Gemini AI Assistant === */
 .hero-action-left {
@@ -544,6 +577,12 @@ table tr:hover { background: var(--background); }
 .input-hint {
     margin: -0.35rem 0 0; color: var(--text-secondary); font-size: 0.8rem; line-height: 1.5;
 }
+.ai-preview-option {
+    display: flex; align-items: center; gap: 0.55rem; cursor: pointer;
+}
+.ai-preview-option input {
+    width: 1rem; height: 1rem; margin: 0; accent-color: var(--primary-color);
+}
 .ai-settings-actions {
     display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem;
 }
@@ -564,6 +603,11 @@ table tr:hover { background: var(--background); }
     width: min(420px, calc(100vw - 2rem)); max-height: calc(100vh - 2.5rem);
     background: var(--surface); border: 1px solid rgba(30, 144, 255, 0.22);
     border-radius: 12px; box-shadow: var(--shadow-xl); overflow: hidden;
+}
+@media (min-width: 1280px) {
+    body:has(.ai-assist-floating) {
+        padding-right: 460px;
+    }
 }
 .ai-assist-header {
     display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem;
@@ -604,6 +648,23 @@ table tr:hover { background: var(--background); }
     font-size: 0.8rem; line-height: 1.5;
 }
 .ai-assist-privacy-note i { margin-top: 0.1rem; color: #d97706; }
+.ai-assist-payload-preview {
+    margin-bottom: 0.75rem; border: 1px solid var(--border-color); border-radius: 8px;
+    background: #f8fafc; color: var(--text-secondary); font-size: 0.8rem;
+}
+.ai-assist-payload-preview summary {
+    padding: 0.65rem 0.75rem; cursor: pointer; font-weight: 700; color: var(--text-primary);
+}
+.ai-assist-payload-preview pre {
+    max-height: 12rem; margin: 0; padding: 0.75rem; overflow: auto;
+    border-top: 1px solid var(--border-color); white-space: pre-wrap; overflow-wrap: anywhere;
+    font-size: 0.72rem; line-height: 1.45;
+}
+.ai-assist-send-confirmation {
+    display: grid; grid-template-columns: auto 1fr; gap: 0.5rem; align-items: start;
+    margin-bottom: 0.85rem; color: var(--text-secondary); font-size: 0.8rem; line-height: 1.45;
+}
+.ai-assist-send-confirmation input { margin-top: 0.15rem; }
 .ai-assist-actions {
     display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;
 }
@@ -982,6 +1043,23 @@ table tr:hover { background: var(--background); }
     margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;
 }
 
+.preprocess-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem 1.5rem;
+}
+.preprocess-summary-item {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 0.5rem;
+    color: #15803d;
+}
+.preprocess-summary-item span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
 /* === Responsive: 768px === */
 @media (max-width: 768px) {
     .hero-title { font-size: 2.5rem; }
@@ -1001,6 +1079,11 @@ table tr:hover { background: var(--background); }
     .hero-section { padding: 2rem 1.5rem; border-radius: 16px; }
     .grid-2-cols, .upload-section .grid { grid-template-columns: 1fr !important; gap: 1rem; }
     .split-panel { grid-template-columns: 1fr; }
+    .preprocess-summary-grid { grid-template-columns: 1fr; }
+    .analysis-quality-header { flex-direction: column; }
+    .analysis-quality-badges { justify-content: flex-start; }
+    .analysis-quality-items { grid-template-columns: minmax(0, 1fr); }
+    .analysis-quality-item { min-width: 0; }
     .metrics-grid { grid-template-columns: repeat(2, 1fr); }
     .step-indicator { justify-content: flex-start; padding: 1rem 0.75rem; }
     .step-indicator .step { padding: 0.5rem 0.75rem; font-size: 0.8rem; }
@@ -1027,8 +1110,9 @@ table tr:hover { background: var(--background); }
         min-height: 30px; margin: 0; padding: 0.25rem 0.55rem; font-size: 0.78rem;
     }
     .ai-assist-floating {
-        right: 0.75rem; bottom: 0.75rem; width: calc(100vw - 1.5rem);
+        right: 0.75rem; bottom: 0.75rem; width: calc(100vw - 1.5rem); max-height: 55vh;
     }
+    .ai-assist-body { max-height: calc(55vh - 4.5rem); }
 }
 
 /* === Responsive: 480px === */

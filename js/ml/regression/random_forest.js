@@ -34,28 +34,8 @@ export class RandomForestRegressor {
         this.randomState = params.randomState ?? 42;
         /** @type {DecisionTreeRegressor[]} */
         this.trees = [];
-        /** @type {number[][]} Feature subsets used for each tree */
-        this._featureSubsets = [];
         /** @type {number} */
         this.nFeatures = 0;
-    }
-
-    /**
-     * Determine the number of features to sample per tree.
-     * @param {number} totalFeatures
-     * @returns {number}
-     */
-    _getMaxFeatureCount(totalFeatures) {
-        if (typeof this.maxFeatures === 'number') {
-            return Math.min(Math.max(1, Math.floor(this.maxFeatures)), totalFeatures);
-        }
-        if (this.maxFeatures === 'sqrt') {
-            return Math.max(1, Math.floor(Math.sqrt(totalFeatures)));
-        }
-        if (this.maxFeatures === 'log2') {
-            return Math.max(1, Math.floor(Math.log2(totalFeatures)));
-        }
-        return totalFeatures;
     }
 
     /**
@@ -69,22 +49,6 @@ export class RandomForestRegressor {
             indices.push(randomInt(rng, n));
         }
         return indices;
-    }
-
-    /**
-     * Randomly select k feature indices from [0, total).
-     * @param {number} total
-     * @param {number} k
-     * @returns {number[]}
-     */
-    static _sampleFeatures(total, k, rng) {
-        const pool = Array.from({ length: total }, (_, i) => i);
-        // Fisher-Yates partial shuffle
-        for (let i = pool.length - 1; i > pool.length - 1 - k && i > 0; i--) {
-            const j = randomInt(rng, i + 1);
-            [pool[i], pool[j]] = [pool[j], pool[i]];
-        }
-        return pool.slice(pool.length - k).sort((a, b) => a - b);
     }
 
     /**
@@ -103,11 +67,9 @@ export class RandomForestRegressor {
 
         const n = X.length;
         this.nFeatures = X[0].length;
-        const maxFeatCount = this._getMaxFeatureCount(this.nFeatures);
         const rng = createSeededRandom(this.randomState);
 
         this.trees = [];
-        this._featureSubsets = [];
 
         for (let t = 0; t < this.nEstimators; t++) {
             // Bootstrap sample
@@ -115,18 +77,13 @@ export class RandomForestRegressor {
             const Xb = sampleIdx.map(i => X[i]);
             const yb = sampleIdx.map(i => y[i]);
 
-            // Random feature subset
-            const featureSubset = RandomForestRegressor._sampleFeatures(this.nFeatures, maxFeatCount, rng);
-            this._featureSubsets.push(featureSubset);
-
-            // Project data to selected features
-            const XbSub = Xb.map(row => featureSubset.map(fi => row[fi]));
-
             const tree = new DecisionTreeRegressor({
                 maxDepth: this.maxDepth,
                 minSamplesSplit: this.minSamplesSplit,
+                maxFeatures: this.maxFeatures,
+                randomState: randomInt(rng, 0x7fffffff),
             });
-            tree.fit(XbSub, yb);
+            tree.fit(Xb, yb);
             this.trees.push(tree);
         }
 
@@ -150,9 +107,7 @@ export class RandomForestRegressor {
         const sums = Array(nSamples).fill(0);
 
         for (let t = 0; t < this.trees.length; t++) {
-            const featureSubset = this._featureSubsets[t];
-            const Xsub = X.map(row => featureSubset.map(fi => row[fi]));
-            const preds = this.trees[t].predict(Xsub);
+            const preds = this.trees[t].predict(X);
             for (let i = 0; i < nSamples; i++) {
                 sums[i] += preds[i];
             }
@@ -189,9 +144,8 @@ export class RandomForestRegressor {
         for (let t = 0; t < this.trees.length; t++) {
             const treeImp = this.trees[t].getFeatureImportance();
             if (!treeImp) continue;
-            const featureSubset = this._featureSubsets[t];
-            for (let j = 0; j < featureSubset.length; j++) {
-                importances[featureSubset[j]] += treeImp[j];
+            for (let j = 0; j < this.nFeatures; j++) {
+                importances[j] += treeImp[j] || 0;
             }
         }
 

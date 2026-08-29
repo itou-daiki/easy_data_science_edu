@@ -1,7 +1,7 @@
 // ==========================================
 // データ前処理 Module
 // ==========================================
-import { createSelect, formatNumber, renderPlot } from '../utils.js';
+import { bindAccessibleTabs, createSelect, escapeHtml, formatNumber, renderPlot } from '../utils.js';
 import { buildAnalysisContext, renderAIAssistPanel } from '../ai_assistant.js';
 
 export function render(container, data, characteristics) {
@@ -15,23 +15,23 @@ export function render(container, data, characteristics) {
             機械学習の前にデータを整えます。欠損値補完・スケーリング・エンコーディングの効果を確認できます。
         </p>
 
-        <div class="tab-container">
-            <button class="tab-btn active" data-tab="missing">欠損値処理</button>
-            <button class="tab-btn" data-tab="scaling">スケーリング</button>
-            <button class="tab-btn" data-tab="encoding">エンコーディング</button>
-            <button class="tab-btn" data-tab="outliers">外れ値検出</button>
+        <div class="tab-container" role="tablist" aria-label="前処理表示">
+            <button id="pre-tab-missing" class="tab-btn active" data-tab="missing" role="tab" aria-controls="tab-missing" aria-selected="true">欠損値処理</button>
+            <button id="pre-tab-scaling" class="tab-btn" data-tab="scaling" role="tab" aria-controls="tab-scaling" aria-selected="false" tabindex="-1">スケーリング</button>
+            <button id="pre-tab-encoding" class="tab-btn" data-tab="encoding" role="tab" aria-controls="tab-encoding" aria-selected="false" tabindex="-1">エンコーディング</button>
+            <button id="pre-tab-outliers" class="tab-btn" data-tab="outliers" role="tab" aria-controls="tab-outliers" aria-selected="false" tabindex="-1">外れ値検出</button>
         </div>
 
-        <div id="tab-missing" class="tab-content active">
+        <div id="tab-missing" class="tab-content active" role="tabpanel" aria-labelledby="pre-tab-missing">
             ${renderMissingTab(data, allCols)}
         </div>
-        <div id="tab-scaling" class="tab-content">
+        <div id="tab-scaling" class="tab-content" role="tabpanel" aria-labelledby="pre-tab-scaling" hidden>
             ${renderScalingTab(data, numCols)}
         </div>
-        <div id="tab-encoding" class="tab-content">
+        <div id="tab-encoding" class="tab-content" role="tabpanel" aria-labelledby="pre-tab-encoding" hidden>
             ${renderEncodingTab(data, catCols, numCols)}
         </div>
-        <div id="tab-outliers" class="tab-content">
+        <div id="tab-outliers" class="tab-content" role="tabpanel" aria-labelledby="pre-tab-outliers" hidden>
             <div style="margin-bottom: 1rem;">
                 <label style="font-weight: 600;">変数を選択:</label>
                 ${createSelect('outlier-var-select', numCols)}
@@ -41,15 +41,7 @@ export function render(container, data, characteristics) {
         </div>
     `;
 
-    // Tab switching
-    container.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            container.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            container.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            btn.classList.add('active');
-            container.querySelector(`#tab-${btn.dataset.tab}`).classList.add('active');
-        });
-    });
+    bindAccessibleTabs(container);
 
     // Outlier detection
     const outlierSelect = container.querySelector('#outlier-var-select');
@@ -259,18 +251,18 @@ function renderEncodingTab(data, catCols, numCols) {
                     ${catInfo.map(c => {
                         let method;
                         if (c.isNumericCoded) {
-                            method = 'そのまま使用可能（数値コード）';
+                            method = 'One-Hot Encoding（数値コードをカテゴリ扱い）';
                         } else if (c.uniqueCount === 2) {
-                            method = 'Label Encoding (2値)';
+                            method = 'One-Hot Encoding (2値)';
                         } else if (c.uniqueCount <= 10) {
-                            method = 'Label Encoding';
+                            method = 'One-Hot Encoding';
                         } else {
-                            method = 'Label Encoding（高カーディナリティ）';
+                            method = 'One-Hot Encoding（高カーディナリティに注意）';
                         }
                         return `<tr>
-                            <td><strong data-i18n-ignore>${c.col}</strong></td>
+                            <td><strong data-i18n-ignore>${escapeHtml(c.col)}</strong></td>
                             <td>${c.uniqueCount}</td>
-                            <td data-i18n-ignore>${c.values.join(', ')}${c.uniqueCount > 5 ? '...' : ''}</td>
+                            <td data-i18n-ignore>${escapeHtml(c.values.join(', '))}${c.uniqueCount > 5 ? '...' : ''}</td>
                             <td>${c.isNumericCoded ? '数値' : '文字列'}</td>
                             <td><span style="color: #1e90ff; font-weight: 600;">${method}</span></td>
                         </tr>`;
@@ -279,7 +271,7 @@ function renderEncodingTab(data, catCols, numCols) {
             </table>
         </div>
         <p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 1rem;">
-            <i class="fas fa-info-circle"></i> AutoML 機能ではカテゴリ変数は自動的にエンコードされます。
+            <i class="fas fa-info-circle"></i> AutoML 機能ではカテゴリ変数をfold内の訓練データでOne-Hot Encodingし、未知カテゴリは全0として扱います。
         </p>
     `;
 }

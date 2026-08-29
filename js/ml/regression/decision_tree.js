@@ -4,6 +4,8 @@
  * @module regression/decision_tree
  */
 
+import { createSeededRandom, shuffleCopy } from '../random.js';
+
 /**
  * @typedef {Object} TreeNode
  * @property {number}    [featureIndex] - Feature used for splitting.
@@ -23,6 +25,8 @@ export class DecisionTreeRegressor {
      * @param {number}  params.maxDepth            - Max tree depth (default 5).
      * @param {number}  params.minSamplesSplit     - Min samples to attempt a split (default 2).
      * @param {number}  params.minSamplesLeaf      - Min samples in a leaf (default 1).
+     * @param {string|number|null} params.maxFeatures - Candidate features sampled at each split.
+     * @param {number} params.randomState           - Seed for feature sampling.
      */
     constructor(params = {}) {
         /** @type {number} */
@@ -31,6 +35,12 @@ export class DecisionTreeRegressor {
         this.minSamplesSplit = params.minSamplesSplit ?? 2;
         /** @type {number} */
         this.minSamplesLeaf = params.minSamplesLeaf ?? 1;
+        /** @type {string|number|null} */
+        this.maxFeatures = 'maxFeatures' in params ? params.maxFeatures : null;
+        /** @type {number} */
+        this.randomState = params.randomState ?? 42;
+        /** @type {(() => number)|null} */
+        this._rng = null;
         /** @type {TreeNode|null} */
         this.tree = null;
         /** @type {number} */
@@ -67,6 +77,7 @@ export class DecisionTreeRegressor {
 
         this.nFeatures = X[0].length;
         this._featureImportances = Array(this.nFeatures).fill(0);
+        this._rng = createSeededRandom(this.randomState);
 
         const indices = Array.from({ length: X.length }, (_, i) => i);
         this.tree = this._buildTree(X, y, indices, 0);
@@ -80,10 +91,9 @@ export class DecisionTreeRegressor {
      * @param {number[]}   y
      * @param {number[]}   indices - Sample indices for this node.
      * @param {number}     depth
-     * @param {number[]}   [featureSubset] - Optional subset of feature indices to consider.
      * @returns {TreeNode}
      */
-    _buildTree(X, y, indices, depth, featureSubset = null) {
+    _buildTree(X, y, indices, depth) {
         const n = indices.length;
         const targets = indices.map(i => y[i]);
         const mean = targets.reduce((a, b) => a + b, 0) / n;
@@ -103,7 +113,7 @@ export class DecisionTreeRegressor {
             return { value: mean };
         }
 
-        const featureIndices = featureSubset ?? Array.from({ length: this.nFeatures }, (_, i) => i);
+        const featureIndices = this._sampleFeatureIndices();
         let bestFeature = -1;
         let bestThreshold = 0;
         let bestScore = Infinity;
@@ -159,8 +169,8 @@ export class DecisionTreeRegressor {
             this._featureImportances[bestFeature] += reduction;
         }
 
-        const leftChild = this._buildTree(X, y, bestLeftIdx, depth + 1, featureSubset);
-        const rightChild = this._buildTree(X, y, bestRightIdx, depth + 1, featureSubset);
+        const leftChild = this._buildTree(X, y, bestLeftIdx, depth + 1);
+        const rightChild = this._buildTree(X, y, bestRightIdx, depth + 1);
 
         return {
             featureIndex: bestFeature,
@@ -168,6 +178,20 @@ export class DecisionTreeRegressor {
             left: leftChild,
             right: rightChild,
         };
+    }
+
+    /** @private */
+    _sampleFeatureIndices() {
+        let count = this.nFeatures;
+        if (typeof this.maxFeatures === 'number') {
+            count = Math.min(this.nFeatures, Math.max(1, Math.floor(this.maxFeatures)));
+        } else if (this.maxFeatures === 'sqrt') {
+            count = Math.max(1, Math.floor(Math.sqrt(this.nFeatures)));
+        } else if (this.maxFeatures === 'log2') {
+            count = Math.max(1, Math.floor(Math.log2(this.nFeatures)));
+        }
+        const all = Array.from({ length: this.nFeatures }, (_, index) => index);
+        return count >= this.nFeatures ? all : shuffleCopy(all, this._rng).slice(0, count);
     }
 
     /**
@@ -210,6 +234,8 @@ export class DecisionTreeRegressor {
             maxDepth: this.maxDepth,
             minSamplesSplit: this.minSamplesSplit,
             minSamplesLeaf: this.minSamplesLeaf,
+            maxFeatures: this.maxFeatures,
+            randomState: this.randomState,
         };
     }
 

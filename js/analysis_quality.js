@@ -28,7 +28,10 @@ export function buildAnalysisQualityReport(options = {}) {
         yTrain = [],
         yTest = [],
         preprocessInfo = null,
-        result = null
+        result = null,
+        splitStrategy = 'random',
+        splitColumn = null,
+        splitGap = 0,
     } = options;
 
     const items = [];
@@ -47,7 +50,9 @@ export function buildAnalysisQualityReport(options = {}) {
     checkMissingValues(add, data, targetCol, selectedFeatures);
     checkTarget(add, task, targetValues, yTrain, targetCol);
     checkFeatureRisks(add, data, task, targetCol, selectedFeatures, targetValues);
+    checkCategoricalEncoding(add, data, selectedFeatures);
     checkCvSettings(add, requestedCvFolds, effectiveCvFolds);
+    checkSplitStrategy(add, splitStrategy, splitColumn, splitGap);
     checkPreprocessing(add, rowCount, preprocessInfo);
     checkResult(add, task, result);
 
@@ -64,6 +69,32 @@ export function buildAnalysisQualityReport(options = {}) {
 
     const overall = counts.danger > 0 ? 'danger' : counts.warning > 0 ? 'warning' : 'good';
     return { overall, counts, items };
+}
+
+function checkSplitStrategy(add, strategy, column, gap) {
+    if (strategy === 'group') {
+        add('good', 'グループ非重複で評価', `「${column}」の同じグループが訓練と検証・テストをまたがないように分割します。未知グループへの一般化を評価します。`);
+        return;
+    }
+    if (strategy === 'time') {
+        add('good', '時系列順で評価', `「${column}」で並べ、過去で学習して未来を評価します。訓練と評価の間は${gap || 0}行空けます。`);
+        return;
+    }
+    add('info', '無作為分割の前提', '各行が独立で、将来データも同じ分布に従う場合の分割です。同一対象の反復測定や時系列では、セットアップで専用の分割へ変更してください。');
+}
+
+function checkCategoricalEncoding(add, data, selectedFeatures) {
+    const categoricalFeatures = selectedFeatures.filter(feature => {
+        const values = getColumnValues(data, feature).filter(value => !isMissing(value));
+        return values.length > 0 && !values.every(value => Number.isFinite(Number(value)));
+    });
+    if (categoricalFeatures.length === 0) return;
+
+    add(
+        'good',
+        'カテゴリ特徴量はOne-Hot Encoding',
+        `${categoricalFeatures.slice(0, 4).join(', ')} は、各foldの訓練データでカテゴリを学習してOne-Hot Encodingします。検証時の未知カテゴリは全0として扱います。`
+    );
 }
 
 /**
@@ -306,11 +337,13 @@ function checkResult(add, task, result) {
     }
 
     if (task === 'regression') {
-        const gap = result.cvMean - result.r2;
-        if (Number.isFinite(gap) && gap >= 0.3) {
-            add('danger', 'CVとTestの差が大きい', `CV R²がTest R²より${formatNumber(gap)}高いです。過学習、データ分割差、foldごとの検証データの偏りを疑ってください。`);
-        } else if (Number.isFinite(gap) && gap >= 0.15) {
-            add('warning', 'CVとTestの差に注意', `CV R²がTest R²より${formatNumber(gap)}高いです。独立テスト指標を優先してください。`);
+        if (result.holdoutEvaluated === true && Number.isFinite(result.cvMean) && Number.isFinite(result.r2)) {
+            const gap = result.cvMean - result.r2;
+            if (gap >= 0.3) {
+                add('danger', 'CVとTestの差が大きい', `CV R²がTest R²より${formatNumber(gap)}高いです。過学習、データ分割差、foldごとの検証データの偏りを疑ってください。`);
+            } else if (gap >= 0.15) {
+                add('warning', 'CVとTestの差に注意', `CV R²がTest R²より${formatNumber(gap)}高いです。独立テスト指標を優先してください。`);
+            }
         }
         if (Number.isFinite(result.r2) && result.r2 < 0) {
             add('warning', 'Test R²が負です', 'テストデータでは平均値予測より悪い可能性があります。特徴量・外れ値・目的変数を見直してください。');
@@ -325,11 +358,13 @@ function checkResult(add, task, result) {
         return;
     }
 
-    const gap = result.cvMean - result.f1;
-    if (Number.isFinite(gap) && gap >= 0.2) {
-        add('danger', 'CVとTestの差が大きい', `CV F1がTest F1より${formatNumber(gap)}高いです。過学習や分割差を疑ってください。`);
-    } else if (Number.isFinite(gap) && gap >= 0.1) {
-        add('warning', 'CVとTestの差に注意', `CV F1がTest F1より${formatNumber(gap)}高いです。混同行列とクラス別Recallを重視してください。`);
+    if (result.holdoutEvaluated === true && Number.isFinite(result.cvMean) && Number.isFinite(result.f1)) {
+        const gap = result.cvMean - result.f1;
+        if (gap >= 0.2) {
+            add('danger', 'CVとTestの差が大きい', `CV F1がTest F1より${formatNumber(gap)}高いです。過学習や分割差を疑ってください。`);
+        } else if (gap >= 0.1) {
+            add('warning', 'CVとTestの差に注意', `CV F1がTest F1より${formatNumber(gap)}高いです。混同行列とクラス別Recallを重視してください。`);
+        }
     }
     if (result.baseline && Number.isFinite(result.f1) && Number.isFinite(result.baseline.f1)) {
         if (result.f1 <= result.baseline.f1 + 0.02) {

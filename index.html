@@ -12,7 +12,8 @@
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
 
     <!-- Font Awesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+        integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous">
 
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -22,6 +23,7 @@
 </head>
 
 <body>
+    <a class="skip-link" href="#navigation-section">分析機能へ移動</a>
     <!-- Loading Screen -->
     <div id="loading-screen" class="loading-screen">
         <div class="loading-content">
@@ -37,11 +39,11 @@
     </div>
 
     <!-- Demo Data Selector Modal -->
-    <div id="demo-modal" class="modal">
+    <div id="demo-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="demo-modal-title" aria-hidden="true">
         <div class="modal-content demo-modal-content">
             <div class="modal-header">
-                <h3><i class="fas fa-database"></i> デモデータを選択</h3>
-                <span class="close-modal" id="close-demo-modal">&times;</span>
+                <h3 id="demo-modal-title"><i class="fas fa-database"></i> デモデータを選択</h3>
+                <button type="button" class="close-modal" id="close-demo-modal" aria-label="閉じる">&times;</button>
             </div>
             <p style="margin-bottom: 1.5rem; color: #64748b;">
                 分析目的に合わせたデータセットを選択してください。<br>
@@ -101,25 +103,36 @@
     </div>
 
     <!-- Gemini AI Settings Modal -->
-    <div id="ai-settings-modal" class="modal">
+    <div id="ai-settings-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="ai-settings-modal-title" aria-hidden="true">
         <div class="modal-content ai-settings-modal-content">
             <div class="modal-header">
-                <h3><i class="fas fa-magic"></i> 生成AI支援の設定</h3>
-                <span class="close-modal" id="close-ai-settings-modal">&times;</span>
+                <h3 id="ai-settings-modal-title"><i class="fas fa-magic"></i> 生成AI支援の設定</h3>
+                <button type="button" class="close-modal" id="close-ai-settings-modal" aria-label="閉じる">&times;</button>
             </div>
             <p class="ai-settings-description">
                 分析結果ページでは、APIキーがなくても他の生成AIに貼り付けるためのAI用テキストをコピーできます。
                 Gemini APIキーを入力すると、ブラウザ内の補助パネルから直接「解釈を生成」し、結果について追加質問できます。
-                APIキーはこのブラウザタブ内にのみ保持されます。「解釈を生成」または追加質問を押した場合のみ、
-                データプレビュー先頭10件・要約統計量・データ構造・分析手法・主要指標・注意点が Google Gemini API へ送信されます。
+                APIキーはこのページのメモリ内にだけ保持され、再読み込みすると消えます。「解釈を生成」または追加質問を押した場合のみ、
+                要約統計量・データ構造・分析手法・主要指標・注意点が Google Gemini API へ送信されます。
+                ブラウザアプリではキーを完全に秘匿できないため、利用制限を設定した専用キーを使用してください。
             </p>
-            <div class="ai-settings-form">
+            <form class="ai-settings-form" onsubmit="return false;">
                 <label for="gemini-api-key-input">Gemini APIキー</label>
-                <input type="password" id="gemini-api-key-input" placeholder="AIza..." autocomplete="off">
+                <input type="password" id="gemini-api-key-input" placeholder="Google AI StudioのAuth key" autocomplete="off">
+                <p class="input-hint">
+                    Googleは2026年9月からStandard keyを拒否します。Google AI Studioで作成したAuth keyを使用してください。
+                    <a href="https://ai.google.dev/gemini-api/docs/api-key" target="_blank" rel="noopener noreferrer">公式のキー移行案内</a>
+                </p>
 
                 <label for="gemini-model-input">使用モデル</label>
                 <input type="text" id="gemini-model-input" value="gemini-2.5-flash" autocomplete="off">
                 <p class="input-hint">指定モデルが利用できない場合は gemini-2.5-flash へ自動で切り替えます。</p>
+
+                <label class="ai-preview-option" for="gemini-include-preview-input">
+                    <input type="checkbox" id="gemini-include-preview-input">
+                    データ先頭10件の値も送信する
+                </label>
+                <p class="input-hint">既定では送信しません。個人情報や機密情報がないことを確認した場合だけ有効にしてください。</p>
 
                 <div class="ai-settings-actions">
                     <button type="button" id="save-ai-settings-btn" class="btn-analysis">
@@ -129,8 +142,8 @@
                         <i class="fas fa-ban"></i> 無効化
                     </button>
                 </div>
-                <div id="ai-settings-status" class="ai-settings-status"></div>
-            </div>
+                <div id="ai-settings-status" class="ai-settings-status" role="status" aria-live="polite"></div>
+            </form>
         </div>
     </div>
 
@@ -149,7 +162,7 @@
     </script>
 
     <!-- Main Container -->
-    <div id="main-app" style="display: none;">
+    <main id="main-app" style="display: none;">
         <!-- Hero Section -->
         <div class="hero-section">
             <div class="hero-action-left">
@@ -164,7 +177,7 @@
                     data-language-switch data-i18n-ignore aria-label="表示言語">
                     <i class="fas fa-language" aria-hidden="true"></i>
                     <button type="button" class="language-option active" data-language-option="ja"
-                        aria-pressed="true">日本語</button>
+                        aria-pressed="true">JP</button>
                     <button type="button" class="language-option" data-language-option="en"
                         aria-pressed="false">EN</button>
                 </div>
@@ -290,13 +303,13 @@
                         </div>
                     </div>
                     <div class="category-cards">
-                        <div class="feature-card" data-analysis="regression" data-requires="numeric:2">
+                        <div class="feature-card" data-analysis="regression" data-requires="regression">
                             <h3 class="feature-card-title">
                                 <i class="fas fa-robot feature-card-icon"></i>
                                 回帰モデル比較 (AutoML)
                             </h3>
                             <p class="feature-card-description">複数の回帰モデルを一括で学習・比較し、最適なモデルを見つけます</p>
-                            <p class="feature-card-requirement" style="display: none;">数値変数が2つ以上必要です</p>
+                            <p class="feature-card-requirement" style="display: none;">数値の目的変数と、別の特徴量が必要です</p>
                         </div>
                     </div>
                 </div>
@@ -311,13 +324,13 @@
                         </div>
                     </div>
                     <div class="category-cards">
-                        <div class="feature-card" data-analysis="classification" data-requires="numeric:1">
+                        <div class="feature-card" data-analysis="classification" data-requires="classification">
                             <h3 class="feature-card-title">
                                 <i class="fas fa-robot feature-card-icon"></i>
                                 分類モデル比較 (AutoML)
                             </h3>
                             <p class="feature-card-description">複数の分類モデルを一括で学習・比較し、最適なモデルを見つけます</p>
-                            <p class="feature-card-requirement" style="display: none;">数値変数が1つ以上必要です</p>
+                            <p class="feature-card-requirement" style="display: none;">2〜20種類の目的変数候補と、別の特徴量が必要です</p>
                         </div>
                     </div>
                 </div>
@@ -432,17 +445,17 @@
                     <p>
                         <strong>easyDataScience</strong>は、ブラウザ上で動作する無料の機械学習Webアプリケーションです。
                         PyCaret のように複数のモデルを自動比較し、最適なモデルを見つけることができます。
-                        すべての処理はブラウザ内で完結し、データが外部に送信されることはありません。
+                        通常のデータ処理と学習はブラウザ内で完結します。生成AI支援を実行した場合だけ、選択した分析文脈が Google Gemini API へ送信されます。
                     </p>
 
                     <h4>主な特徴</h4>
                     <ul>
                         <li><strong>完全ブラウザベース:</strong> インストール不要、Webブラウザだけで利用可能</li>
-                        <li><strong>データプライバシー:</strong> データはブラウザ内で処理され、外部サーバーに送信されません</li>
+                        <li><strong>データプライバシー:</strong> 通常処理は端末内で完結し、生成AIへの送信範囲は利用者が選択</li>
                         <li><strong>AutoML機能:</strong> PyCaret のように複数モデルを自動で学習・比較</li>
                         <li><strong>回帰・分類対応:</strong> 連続値予測とカテゴリ分類の両方に対応</li>
                         <li><strong>画像・音声分類:</strong> TensorFlow.js による転移学習で画像分類、Web Audio API で音声分類が可能</li>
-                        <li><strong>日本語対応:</strong> UIと分析結果の解釈がすべて日本語</li>
+                        <li><strong>日英対応:</strong> UI、分析結果の解釈、マニュアルを日本語と英語で切り替え</li>
                         <li><strong>教育的:</strong> 機械学習手法の説明と結果の解釈を提供</li>
                     </ul>
 
@@ -555,20 +568,7 @@
                 </div>
             </div>
         </footer>
-    </div>
-
-    <!-- JavaScript Libraries -->
-    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jstat@latest/dist/jstat.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.7.0/math.min.js"></script>
-
-    <!-- TensorFlow.js (for Image/Audio Classification) -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0/dist/mobilenet.min.js"></script>
-
-    <!-- Pose Detection (for Video Analysis) -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
+    </main>
 
     <!-- Custom JavaScript -->
     <script type="module" src="js/main.js"></script>

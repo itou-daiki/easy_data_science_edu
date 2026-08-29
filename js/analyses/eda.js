@@ -1,7 +1,7 @@
 // ==========================================
 // 探索的データ分析 (EDA) Module
 // ==========================================
-import { renderPlot, createSelect, formatNumber } from '../utils.js';
+import { bindAccessibleTabs, renderPlot, createSelect, escapeHtml, formatNumber } from '../utils.js';
 import { buildAnalysisContext, renderAIAssistPanel } from '../ai_assistant.js';
 
 export function render(container, data, characteristics) {
@@ -16,17 +16,17 @@ export function render(container, data, characteristics) {
         </p>
 
         <div class="eda-tabs">
-            <div class="tab-container">
-                <button class="tab-btn active" data-tab="overview">概要</button>
-                <button class="tab-btn" data-tab="distribution">分布</button>
-                <button class="tab-btn" data-tab="correlation">相関</button>
-                <button class="tab-btn" data-tab="missing">欠損値</button>
+            <div class="tab-container" role="tablist" aria-label="EDA表示">
+                <button id="eda-tab-overview" class="tab-btn active" data-tab="overview" role="tab" aria-controls="tab-overview" aria-selected="true">概要</button>
+                <button id="eda-tab-distribution" class="tab-btn" data-tab="distribution" role="tab" aria-controls="tab-distribution" aria-selected="false" tabindex="-1">分布</button>
+                <button id="eda-tab-correlation" class="tab-btn" data-tab="correlation" role="tab" aria-controls="tab-correlation" aria-selected="false" tabindex="-1">相関</button>
+                <button id="eda-tab-missing" class="tab-btn" data-tab="missing" role="tab" aria-controls="tab-missing" aria-selected="false" tabindex="-1">欠損値</button>
             </div>
 
-            <div id="tab-overview" class="tab-content active">
+            <div id="tab-overview" class="tab-content active" role="tabpanel" aria-labelledby="eda-tab-overview">
                 <div id="overview-content"></div>
             </div>
-            <div id="tab-distribution" class="tab-content">
+            <div id="tab-distribution" class="tab-content" role="tabpanel" aria-labelledby="eda-tab-distribution" hidden>
                 <div style="margin-bottom: 1rem;">
                     <label style="font-weight: 600;">変数を選択:</label>
                     ${createSelect('dist-var-select', numCols)}
@@ -34,25 +34,17 @@ export function render(container, data, characteristics) {
                 <div id="distribution-plot" style="min-height: 400px;"></div>
                 <div id="distribution-stats" style="margin-top: 1rem;"></div>
             </div>
-            <div id="tab-correlation" class="tab-content">
+            <div id="tab-correlation" class="tab-content" role="tabpanel" aria-labelledby="eda-tab-correlation" hidden>
                 <div id="correlation-plot" style="min-height: 500px;"></div>
                 <div id="correlation-table" style="margin-top: 1rem;"></div>
             </div>
-            <div id="tab-missing" class="tab-content">
+            <div id="tab-missing" class="tab-content" role="tabpanel" aria-labelledby="eda-tab-missing" hidden>
                 <div id="missing-content"></div>
             </div>
         </div>
     `;
 
-    // Tab switching
-    container.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            container.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            container.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            btn.classList.add('active');
-            container.querySelector(`#tab-${btn.dataset.tab}`).classList.add('active');
-        });
-    });
+    bindAccessibleTabs(container.querySelector('.eda-tabs'));
 
     renderOverview(data, characteristics);
     renderMissing(data, allCols);
@@ -149,7 +141,7 @@ function renderOverview(data, chars) {
                         const type = chars.numericColumns.includes(col) ? '数値' :
                                      chars.categoricalColumns.includes(col) ? 'カテゴリ' : 'テキスト';
                         const sample = values.slice(0, 3).join(', ');
-                        return `<tr><td><strong data-i18n-ignore>${col}</strong></td><td>${type}</td><td>${unique}</td><td>${missing}</td><td data-i18n-ignore style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">${sample}</td></tr>`;
+                        return `<tr><td><strong data-i18n-ignore>${escapeHtml(col)}</strong></td><td>${type}</td><td>${unique}</td><td>${missing}</td><td data-i18n-ignore style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(sample)}</td></tr>`;
                     }).join('')}
                 </tbody>
             </table>
@@ -276,7 +268,7 @@ function renderMissing(data, allCols) {
                 <tbody>
                     ${missingCols.map(m => `
                         <tr>
-                            <td><strong data-i18n-ignore>${m.col}</strong></td>
+                            <td><strong data-i18n-ignore>${escapeHtml(m.col)}</strong></td>
                             <td>${m.missing}</td>
                             <td>${m.rate.toFixed(1)}%</td>
                             <td>${m.rate > 50 ? '<span style="color:#ef4444;">要注意</span>' : m.rate > 20 ? '<span style="color:#f59e0b;">注意</span>' : '<span style="color:#10b981;">軽微</span>'}</td>

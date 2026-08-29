@@ -2,10 +2,11 @@
  * metrics.js - Evaluation metrics for regression and classification
  *
  * All functions are pure: they never mutate their inputs.
- * Depends on globally available `math` (math.js) and `jStat`.
  *
  * @module metrics
  */
+
+import { createSeededRandom, randomInt } from './random.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -27,6 +28,76 @@ function _validatePair(yTrue, yPred, context) {
   if (yTrue.length !== yPred.length) {
     throw new Error(`${context}: yTrue (${yTrue.length}) and yPred (${yPred.length}) must have the same length`);
   }
+}
+
+function _quantile(sorted, q) {
+  if (sorted.length === 0) return NaN;
+  const position = (sorted.length - 1) * q;
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  if (lower === upper) return sorted[lower];
+  return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
+}
+
+/**
+ * Percentile bootstrap interval for a metric evaluated on paired outcomes.
+ * Stratified resampling preserves every class count for classification metrics.
+ *
+ * @param {Array} yTrue
+ * @param {Array} yPred
+ * @param {(truth: Array, prediction: Array) => number} metric
+ * @param {Object} options
+ * @returns {{ estimate: number, lower: number, upper: number, confidenceLevel: number, validResamples: number }|null}
+ */
+export function bootstrapMetricInterval(yTrue, yPred, metric, options = {}) {
+  _validatePair(yTrue, yPred, 'bootstrapMetricInterval');
+  if (typeof metric !== 'function') {
+    throw new Error('bootstrapMetricInterval: metric must be a function');
+  }
+
+  const {
+    confidenceLevel = 0.95,
+    nResamples = 400,
+    randomState = 42,
+    stratified = false,
+  } = options;
+  if (!(confidenceLevel > 0 && confidenceLevel < 1)) {
+    throw new Error('bootstrapMetricInterval: confidenceLevel must be between 0 and 1');
+  }
+  if (!Number.isInteger(nResamples) || nResamples < 20) {
+    throw new Error('bootstrapMetricInterval: nResamples must be an integer of at least 20');
+  }
+  if (yTrue.length < 5) return null;
+
+  const rng = createSeededRandom(randomState);
+  const groups = stratified
+    ? [...new Set(yTrue)].map(label => yTrue.map((value, index) => value === label ? index : -1).filter(index => index >= 0))
+    : [Array.from({ length: yTrue.length }, (_, index) => index)];
+  const estimates = [];
+
+  for (let iteration = 0; iteration < nResamples; iteration++) {
+    const indices = [];
+    for (const group of groups) {
+      for (let i = 0; i < group.length; i++) {
+        indices.push(group[randomInt(rng, group.length)]);
+      }
+    }
+    const truth = indices.map(index => yTrue[index]);
+    const prediction = indices.map(index => yPred[index]);
+    const value = metric(truth, prediction);
+    if (Number.isFinite(value)) estimates.push(value);
+  }
+
+  if (estimates.length < Math.max(20, nResamples * 0.8)) return null;
+  estimates.sort((a, b) => a - b);
+  const alpha = (1 - confidenceLevel) / 2;
+  return {
+    estimate: metric(yTrue, yPred),
+    lower: _quantile(estimates, alpha),
+    upper: _quantile(estimates, 1 - alpha),
+    confidenceLevel,
+    validResamples: estimates.length,
+  };
 }
 
 /**
@@ -98,7 +169,7 @@ export function rootMeanSquaredError(yTrue, yPred) {
  * Coefficient of Determination (R-squared).
  * R^2 = 1 - SS_res / SS_tot
  *
- * Returns negative infinity when SS_tot is zero (constant target).
+ * For a constant target, returns 1 for perfect predictions and 0 otherwise.
  *
  * @param {number[]} yTrue
  * @param {number[]} yPred
@@ -107,6 +178,7 @@ export function rootMeanSquaredError(yTrue, yPred) {
 export function rSquared(yTrue, yPred) {
   _validatePair(yTrue, yPred, 'rSquared');
   const n = yTrue.length;
+  if (n < 2) return NaN;
   const mean = yTrue.reduce((s, v) => s + v, 0) / n;
 
   let ssTot = 0;
@@ -352,6 +424,42 @@ export function f1Score(yTrue, yPred, average = 'macro') {
 }
 
 /**
+ * Matthews correlation coefficient for binary or multiclass predictions.
+ * Uses the confusion-matrix generalization and returns 0 when the denominator
+ * is zero (for example, when one side contains only one predicted class).
+ *
+ * @param {Array<*>} yTrue
+ * @param {Array<*>} yPred
+ * @returns {number} Value in [-1, 1]
+ */
+export function matthewsCorrelationCoefficient(yTrue, yPred) {
+  _validatePair(yTrue, yPred, 'matthewsCorrelationCoefficient');
+  const { matrix } = confusionMatrix(yTrue, yPred);
+  const nClasses = matrix.length;
+  const trueTotals = Array(nClasses).fill(0);
+  const predictedTotals = Array(nClasses).fill(0);
+  let correct = 0;
+  let sampleCount = 0;
+
+  for (let row = 0; row < nClasses; row++) {
+    for (let col = 0; col < nClasses; col++) {
+      const count = matrix[row][col];
+      sampleCount += count;
+      trueTotals[row] += count;
+      predictedTotals[col] += count;
+      if (row === col) correct += count;
+    }
+  }
+
+  const dotTotals = trueTotals.reduce((sum, value, index) => sum + value * predictedTotals[index], 0);
+  const numerator = correct * sampleCount - dotTotals;
+  const predictedVariance = sampleCount ** 2 - predictedTotals.reduce((sum, value) => sum + value ** 2, 0);
+  const trueVariance = sampleCount ** 2 - trueTotals.reduce((sum, value) => sum + value ** 2, 0);
+  const denominator = Math.sqrt(predictedVariance * trueVariance);
+  return denominator === 0 ? 0 : numerator / denominator;
+}
+
+/**
  * Micro-averaged precision, recall, and F1 from a confusion matrix.
  * For micro averaging: precision = recall = F1 = accuracy.
  * @param {number[][]} cm
@@ -517,6 +625,96 @@ export function rocAucScore(yTrue, yProba, positiveLabel = null) {
   }
 
   return auc;
+}
+
+/**
+ * Average precision for binary classification.
+ * Precision is weighted by each non-interpolated increase in recall.
+ * Samples with tied scores are processed as one threshold.
+ *
+ * @param {Array<*>} yTrue
+ * @param {number[]} yScore
+ * @param {*} [positiveLabel]
+ * @returns {number} Value in [0, 1]
+ */
+export function averagePrecisionScore(yTrue, yScore, positiveLabel = null) {
+  _validatePair(yTrue, yScore, 'averagePrecisionScore');
+  if (yScore.some(value => !Number.isFinite(value))) {
+    throw new Error('averagePrecisionScore: yScore must contain finite numbers');
+  }
+  const classes = _uniqueClasses(yTrue);
+  if (classes.length !== 2) {
+    throw new Error(`averagePrecisionScore: binary classification requires exactly two classes (found ${classes.length})`);
+  }
+  const positiveClass = positiveLabel !== null && positiveLabel !== undefined ? positiveLabel : classes[1];
+  if (!classes.includes(positiveClass)) {
+    throw new Error(`averagePrecisionScore: positiveLabel "${positiveClass}" is not present in yTrue`);
+  }
+
+  const ranked = yTrue.map((label, index) => ({
+    score: yScore[index],
+    positive: label === positiveClass,
+  })).sort((a, b) => b.score - a.score);
+  const totalPositive = ranked.filter(item => item.positive).length;
+  if (totalPositive === 0) return NaN;
+
+  let truePositive = 0;
+  let falsePositive = 0;
+  let previousRecall = 0;
+  let averagePrecision = 0;
+  for (let start = 0; start < ranked.length;) {
+    let end = start;
+    while (end < ranked.length && ranked[end].score === ranked[start].score) {
+      if (ranked[end].positive) truePositive++;
+      else falsePositive++;
+      end++;
+    }
+    const recall = truePositive / totalPositive;
+    const precision = truePositive / (truePositive + falsePositive);
+    averagePrecision += (recall - previousRecall) * precision;
+    previousRecall = recall;
+    start = end;
+  }
+  return averagePrecision;
+}
+
+/**
+ * Multiclass one-vs-rest ROC AUC.
+ *
+ * @param {Array} yTrue
+ * @param {number[][]} yProba - Rows ordered to match labels.
+ * @param {Array|null} labels
+ * @param {'macro'|'weighted'} average
+ * @returns {number}
+ */
+export function multiclassRocAucScore(yTrue, yProba, labels = null, average = 'macro') {
+  if (!Array.isArray(yTrue) || !Array.isArray(yProba) || yTrue.length === 0 || yTrue.length !== yProba.length) {
+    throw new Error('multiclassRocAucScore: yTrue and yProba must have the same non-zero length');
+  }
+  if (!['macro', 'weighted'].includes(average)) {
+    throw new Error('multiclassRocAucScore: average must be "macro" or "weighted"');
+  }
+  const classes = labels ? [...labels] : _uniqueClasses(yTrue);
+  if (classes.length < 2) {
+    throw new Error('multiclassRocAucScore: at least two classes are required');
+  }
+  if (yProba.some(row => !Array.isArray(row) || row.length !== classes.length || row.some(value => !Number.isFinite(value)))) {
+    throw new Error('multiclassRocAucScore: each probability row must contain one finite value per class');
+  }
+
+  const perClass = classes.map((label, classIndex) => ({
+    auc: rocAucScore(
+      yTrue.map(value => value === label ? 1 : 0),
+      yProba.map(row => row[classIndex]),
+      1
+    ),
+    support: yTrue.filter(value => value === label).length,
+  }));
+  if (perClass.some(item => !Number.isFinite(item.auc))) return NaN;
+  if (average === 'weighted') {
+    return perClass.reduce((sum, item) => sum + item.auc * item.support, 0) / yTrue.length;
+  }
+  return perClass.reduce((sum, item) => sum + item.auc, 0) / perClass.length;
 }
 
 /**
