@@ -1,7 +1,7 @@
 // ==========================================
 // データ前処理 Module
 // ==========================================
-import { bindAccessibleTabs, createSelect, escapeHtml, formatNumber, renderPlot } from '../utils.js';
+import { bindAccessibleTabs, createSelect, createBeginnerGuide, escapeHtml, formatNumber, renderPlot } from '../utils.js';
 import { buildAnalysisContext, renderAIAssistPanel } from '../ai_assistant.js';
 
 export function render(container, data, characteristics) {
@@ -14,6 +14,17 @@ export function render(container, data, characteristics) {
         <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
             機械学習の前にデータを整えます。欠損値補完・スケーリング・エンコーディングの効果を確認できます。
         </p>
+
+        ${createBeginnerGuide({
+            purpose: { ja: '前処理は、モデルが比較できる形へデータを整える準備です。この画面では必要性を確認します。', en: 'Preprocessing prepares data in a form models can compare. This view helps you decide what preparation is needed.' },
+            lookFor: { ja: '欠損値、数値の単位差、カテゴリ列、外れ値をタブごとに確認します。', en: 'Review missing values, differences in numeric scale, categorical columns, and outliers in each tab.' },
+            nextAction: { ja: '理由を確認したら回帰または分類へ進みます。AutoMLでは前処理を各訓練区画の中だけで自動学習します。', en: 'After reviewing the reasons, continue to regression or classification. AutoML learns preprocessing only within each training fold.' },
+            caution: { ja: '自動推奨は出発点です。列の意味やデータの集め方を確認して、削除・補完を決めます。', en: 'Automatic recommendations are a starting point. Use column meaning and collection context when deciding whether to remove or impute values.' },
+            terms: [{
+                term: { ja: '前処理', en: 'Preprocessing' },
+                meaning: { ja: '欠損を扱い、文字を数値化し、尺度をそろえるなど、学習前にデータを整えることです。', en: 'Preparing data before training, such as handling missing values, encoding labels, and aligning scales.' }
+            }]
+        })}
 
         <div class="tab-container" role="tablist" aria-label="前処理表示">
             <button id="pre-tab-missing" class="tab-btn active" data-tab="missing" role="tab" aria-controls="tab-missing" aria-selected="true">欠損値処理</button>
@@ -104,9 +115,16 @@ function renderMissingTab(data, allCols) {
 
     const totalMissing = missingInfo.reduce((a, b) => a + b.missing, 0);
     const missingCols = missingInfo.filter(m => m.missing > 0);
+    const highestMissing = [...missingCols].sort((a, b) => b.rate - a.rate)[0];
 
     if (missingCols.length === 0) {
-        return `<div style="text-align: center; padding: 2rem; color: #10b981;">
+        return `${createBeginnerGuide({
+            title: { ja: '欠損値処理の判断', en: 'Deciding how to handle missing values' },
+            purpose: { ja: '空欄を補う必要がある列を探します。', en: 'Find columns that need missing values handled.' },
+            lookFor: { ja: 'このデータでは空欄として検出されたセルはありません。', en: 'No blank cells were detected in this dataset.' },
+            nextAction: { ja: '次に「スケーリング」を開き、数値列の単位差を確認します。', en: 'Next, open Scaling and review differences in numeric units.' },
+            caution: { ja: '0、「不明」、999などが欠損の代わりに入力されていないかは元データで確認します。', en: 'Check the source data for codes such as 0, “unknown,” or 999 that may represent missing values.' }
+        })}<div style="text-align: center; padding: 2rem; color: #10b981;">
             <i class="fas fa-check-circle fa-3x" style="margin-bottom: 1rem;"></i>
             <h3>欠損値はありません</h3>
             <p>すべてのセルにデータが入っています。前処理は不要です。</p>
@@ -114,6 +132,16 @@ function renderMissingTab(data, allCols) {
     }
 
     return `
+        ${createBeginnerGuide({
+            title: { ja: '欠損値処理の判断', en: 'Deciding how to handle missing values' },
+            purpose: { ja: '空欄の量を確認し、列ごとに補完するか除外するかを考えます。', en: 'Review the amount of missing data and consider whether to impute or exclude each column.' },
+            lookFor: {
+                ja: `欠損セルは合計${totalMissing}件で、${missingCols.length}列にあります。まず欠損率が最も高い「${highestMissing.col}」を確認します。`,
+                en: `There are ${totalMissing} missing cells across ${missingCols.length} columns. Start with "${highestMissing.col}", which has the highest missing rate.`
+            },
+            nextAction: { ja: '推奨方法と理由を確認し、欠損した理由が分からない場合は元データの作成者に確認します。', en: 'Review the recommended method and reason. If the cause of missingness is unknown, ask whoever created the data.' },
+            caution: { ja: '50%という基準だけで自動削除はしません。重要な列なら、追加収集や別の扱いを検討します。', en: 'Do not remove a column automatically based only on the 50% threshold. For an important column, consider collecting more data or another approach.' }
+        })}
         <div class="metrics-grid" style="margin-bottom: 1.5rem;">
             <div class="metric-card">
                 <div class="metric-label">総欠損セル数</div>
@@ -148,7 +176,7 @@ function renderMissingTab(data, allCols) {
                             reason = 'カテゴリ変数の標準的な方法';
                         }
                         return `<tr>
-                            <td><strong data-i18n-ignore>${m.col}</strong></td>
+                            <td><strong data-i18n-ignore>${escapeHtml(m.col)}</strong></td>
                             <td>${m.missing}</td>
                             <td>${m.rate.toFixed(1)}%</td>
                             <td><span style="color: #1e90ff; font-weight: 600;">${method}</span></td>
@@ -175,16 +203,31 @@ function renderScalingTab(data, numCols) {
         const min = Math.min(...values);
         const max = Math.max(...values);
         const mean = values.reduce((a, b) => a + b, 0) / values.length;
-        const std = Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / (values.length - 1));
+        const std = values.length > 1
+            ? Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / (values.length - 1))
+            : 0;
         return { col, min, max, mean, std, range: max - min };
     });
 
-    const ranges = stats.map(s => s.range);
-    const maxRange = Math.max(...ranges);
-    const minRange = Math.min(...ranges);
-    const needsScaling = maxRange / (minRange || 1) > 10;
+    const ranges = stats.map(s => s.range).filter(range => range > 0);
+    const maxRange = ranges.length > 0 ? Math.max(...ranges) : 0;
+    const minRange = ranges.length > 0 ? Math.min(...ranges) : 0;
+    const needsScaling = ranges.length >= 2 && maxRange / minRange > 10;
 
     return `
+        ${createBeginnerGuide({
+            title: { ja: 'スケーリングの判断', en: 'Deciding whether to scale' },
+            purpose: { ja: '単位の違う数値を、モデルが公平に比べやすい尺度へそろえる必要があるかを確認します。', en: 'Decide whether numeric variables with different units need a comparable scale for modeling.' },
+            lookFor: needsScaling
+                ? { ja: `最大の範囲は最小の範囲の約${formatNumber(maxRange / (minRange || 1))}倍です。距離や係数を使うモデルでは差の影響を受けます。`, en: `The largest range is about ${formatNumber(maxRange / (minRange || 1))} times the smallest. Models based on distances or coefficients can be affected by this difference.` }
+                : { ja: '列どうしの範囲差は大きくありません。各列の単位と標準偏差も確認します。', en: 'The column ranges are not very different. Also review each column’s unit and standard deviation.' },
+            nextAction: { ja: 'AutoMLではStandardScalerが自動適用されるため、ここでは必要性と変換後の意味を理解して次へ進みます。', en: 'AutoML applies StandardScaler automatically, so understand why scaling is used and what transformed values mean, then continue.' },
+            caution: { ja: 'スケーリングは順位や情報を増やす処理ではありません。決定木系モデルは尺度差の影響をほとんど受けません。', en: 'Scaling does not add information or improve rankings by itself. Tree-based models are mostly unaffected by differences in scale.' },
+            terms: [{
+                term: { ja: 'StandardScaler', en: 'StandardScaler' },
+                meaning: { ja: '平均を0、標準偏差を1にする変換です。元の単位ではなく「平均から何標準偏差か」で表します。', en: 'A transformation to mean 0 and standard deviation 1, expressing values by their distance from the mean in standard deviations.' }
+            }]
+        })}
         <div style="background: ${needsScaling ? '#fef3c7' : '#d1fae5'}; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; border-left: 4px solid ${needsScaling ? '#f59e0b' : '#10b981'};">
             <strong>${needsScaling ? '<i class="fas fa-exclamation-triangle"></i> スケーリング推奨' : '<i class="fas fa-check-circle"></i> スケールは概ね均一'}</strong>
             <p style="margin-top: 0.5rem; color: var(--text-secondary);">
@@ -243,6 +286,17 @@ function renderEncodingTab(data, catCols, numCols) {
     });
 
     return `
+        ${createBeginnerGuide({
+            title: { ja: 'エンコーディングの判断', en: 'Deciding how to encode categories' },
+            purpose: { ja: '文字やカテゴリ番号を、順序を勝手に付けずモデルへ渡せる数値に変えます。', en: 'Convert labels or category codes into numbers without inventing an order between categories.' },
+            lookFor: { ja: `${catInfo.length}列がカテゴリとして扱われます。種類数が多い列は、変換後の列数も増えます。`, en: `${catInfo.length} columns are treated as categorical. Columns with many categories will create more encoded features.` },
+            nextAction: { ja: 'サンプル値を見て表記ゆれ（例: A / a / A ）を直し、IDのような列は特徴量から外すか検討します。', en: 'Review example values for inconsistent labels (for example A / a / A with a space) and consider excluding identifier-like columns.' },
+            caution: { ja: '数値で書かれたカテゴリも量ではありません。例として「1組・2組」の2が1の2倍という意味にはなりません。', en: 'A category written as a number is not necessarily a quantity. For example, class 2 is not twice class 1.' },
+            terms: [{
+                term: { ja: 'One-Hot Encoding', en: 'One-hot encoding' },
+                meaning: { ja: 'カテゴリごとに0/1の列を作る方法です。カテゴリ間に大小関係を付けません。', en: 'Creates a 0/1 column for each category without imposing an order between categories.' }
+            }]
+        })}
         <h4>カテゴリ変数のエンコーディング</h4>
         <div class="table-container">
             <table class="table">
@@ -304,6 +358,19 @@ function renderOutlierDetection(data, colName) {
     });
 
     document.getElementById('outlier-info').innerHTML = `
+        ${createBeginnerGuide({
+            title: { ja: `${colName}の外れ値の見方`, en: `How to inspect outliers in ${colName}` },
+            purpose: { ja: '他の値から離れた観測を、箱ひげ図とIQR基準で見つけます。', en: 'Use a box plot and the IQR rule to identify observations far from most values.' },
+            lookFor: { ja: `IQR基準では${outliers.length}件（${(outliers.length / n * 100).toFixed(1)}%）が外れ値候補です。点の位置と元の値を確認します。`, en: `The IQR rule flags ${outliers.length} observations (${(outliers.length / n * 100).toFixed(1)}%) as possible outliers. Review their positions and original values.` },
+            nextAction: outliers.length > 0
+                ? { ja: '入力ミスか、本当に珍しい事例かを元データで調べます。理由なしに削除せず、残した場合と処理した場合を比較します。', en: 'Check the source data to determine whether these are entry errors or genuinely rare cases. Do not remove them without a reason; compare results with and without treatment.' }
+                : { ja: '他の数値列も選び、目的変数と主要な特徴量を確認します。', en: 'Select other numeric columns and inspect the target and important features.' },
+            caution: { ja: 'IQRの外側にある値は「誤り」ではなく候補です。分野の知識と記録方法で判断します。', en: 'A value outside the IQR fence is a candidate, not proof of an error. Decide using domain knowledge and collection context.' },
+            terms: [{
+                term: { ja: 'IQR', en: 'IQR' },
+                meaning: { ja: 'Q3からQ1を引いた値で、中央50%の広がりを表します。', en: 'Q3 minus Q1, describing the spread of the middle 50% of observations.' }
+            }]
+        })}
         <div class="metrics-grid" style="margin-top: 1rem;">
             <div class="metric-card">
                 <div class="metric-label">Q1 (25%点)</div>

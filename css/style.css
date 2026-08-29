@@ -285,6 +285,113 @@ table tr:hover { background: var(--background); }
 .data-stat-card .stat-label { font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.25rem; }
 .data-stat-card .stat-value { font-size: 1.5rem; font-weight: 600; color: var(--primary-color); }
 
+/* === Beginner guidance === */
+.beginner-start {
+    margin: 0 0 2rem; padding: 1.35rem 1.5rem;
+    background: #ffffff; border: 1px solid var(--border-color); border-left: 4px solid #0f766e;
+    border-radius: 8px; box-shadow: var(--shadow-sm);
+}
+.beginner-start-header {
+    display: grid; gap: 0.2rem; margin-bottom: 1rem;
+}
+.beginner-start-kicker {
+    margin: 0; color: #0f766e; font-size: 0.75rem; font-weight: 700;
+}
+.beginner-start h2 {
+    margin: 0; color: var(--text-primary); font-size: 1.25rem;
+}
+.beginner-start-header > p:last-child {
+    margin: 0.2rem 0 0; color: var(--text-secondary); font-size: 0.88rem;
+}
+.beginner-start-steps {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0; margin: 0; padding: 0; list-style: none;
+}
+.beginner-start-steps li {
+    display: grid; grid-template-columns: 1.8rem minmax(0, 1fr); gap: 0.6rem;
+    min-width: 0; padding: 0.7rem 1rem; border-left: 1px solid var(--border-color);
+}
+.beginner-start-steps li:first-child { padding-left: 0; border-left: 0; }
+.beginner-start-step-number,
+.beginner-guide-number {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.65rem; height: 1.65rem; flex: 0 0 1.65rem;
+    border-radius: 50%; background: #0f766e; color: #ffffff;
+    font-size: 0.75rem; font-weight: 700;
+}
+.beginner-start-steps strong {
+    display: block; color: var(--text-primary); font-size: 0.84rem;
+}
+.beginner-start-steps p {
+    margin: 0.2rem 0 0; color: var(--text-secondary); font-size: 0.78rem; line-height: 1.5;
+}
+.beginner-start-choice {
+    margin: 0.8rem 0 0; padding-top: 0.8rem; border-top: 1px solid var(--border-color);
+    color: #334155; font-size: 0.84rem;
+}
+.beginner-start-choice strong { color: #0f766e; }
+.beginner-guide {
+    margin: 1rem 0 1.25rem; padding: 1rem;
+    background: #f8fafc; border: 1px solid var(--border-color); border-left: 4px solid #0f766e;
+    border-radius: 8px; color: var(--text-primary);
+}
+.beginner-guide-heading {
+    display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.8rem;
+    color: #0f766e; font-size: 0.9rem;
+}
+.beginner-guide-steps {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0;
+}
+.beginner-guide-step {
+    display: grid; grid-template-columns: 1.65rem minmax(0, 1fr); gap: 0.55rem;
+    min-width: 0; padding: 0.2rem 0.9rem; border-left: 1px solid var(--border-color);
+}
+.beginner-guide-step:first-child { padding-left: 0; border-left: 0; }
+.beginner-guide-step strong { display: block; font-size: 0.78rem; color: #334155; }
+.beginner-guide-step p {
+    margin: 0.15rem 0 0; color: var(--text-secondary); font-size: 0.78rem; line-height: 1.55;
+    overflow-wrap: anywhere;
+}
+.beginner-guide-caution {
+    display: grid; grid-template-columns: 1rem minmax(0, 1fr); gap: 0.45rem;
+    margin: 0.85rem 0 0; padding-top: 0.75rem; border-top: 1px solid #fed7aa;
+    color: #9a3412; font-size: 0.78rem; line-height: 1.5;
+}
+.beginner-guide-caution i { margin-top: 0.15rem; }
+.beginner-guide-terms {
+    margin-top: 0.8rem; padding-top: 0.7rem; border-top: 1px solid var(--border-color);
+    color: var(--text-secondary); font-size: 0.78rem;
+}
+.beginner-guide-terms summary {
+    width: fit-content; cursor: pointer; color: #0f766e; font-weight: 700;
+}
+.beginner-guide-terms dl { display: grid; gap: 0.45rem; margin: 0.65rem 0 0; }
+.beginner-guide-terms dl > div {
+    display: grid; grid-template-columns: minmax(5rem, auto) minmax(0, 1fr); gap: 0.7rem;
+}
+.beginner-guide-terms dt { color: var(--text-primary); font-weight: 700; }
+.beginner-guide-terms dd { margin: 0; }
+.beginner-next-status {
+    margin: 0.9rem 0; padding: 0.7rem 0.85rem;
+    color: #0f5132; background: #f0fdf4; border-left: 3px solid #16a34a;
+    font-size: 0.84rem; line-height: 1.5;
+}
+.create-model-config-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1rem;
+    margin: 1rem 0;
+}
+.create-param-row {
+    display: grid;
+    grid-template-columns: minmax(100px, 1fr) minmax(100px, 120px);
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+.create-param-row label { min-width: 0; font-size: 0.85rem; }
+.create-param-row .form-select { width: 100%; min-width: 0; font-size: 0.85rem; }
+
 /* === Plot Area === */
 #plot-area { margin-top: 2rem; padding: 1rem; background: white; border-radius: 8px; box-shadow: var(--shadow-sm); }
 
@@ -613,6 +720,26 @@ table tr:hover { background: var(--background); }
 .ai-settings-lead {
     margin: 0 0 0.9rem; color: #334155; font-size: 0.92rem;
 }
+.ai-settings-role-note {
+    display: grid; grid-template-columns: minmax(7.5rem, auto) minmax(0, 1fr);
+    gap: 0.35rem 0.75rem; margin: 0 0 0.9rem; padding: 0.75rem 0;
+    border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color);
+    color: #475569; font-size: 0.8rem; line-height: 1.5;
+}
+.ai-settings-role-note strong { color: #0f766e; }
+.ai-settings-routes {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 0 0 0.9rem;
+    border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;
+}
+.ai-settings-routes > div {
+    display: grid; grid-template-columns: 1.2rem minmax(0, 1fr); gap: 0.55rem;
+    align-items: start; padding: 0.75rem; background: #ffffff;
+}
+.ai-settings-routes > div + div { border-left: 1px solid var(--border-color); }
+.ai-settings-routes i { margin-top: 0.18rem; color: #0369a1; text-align: center; }
+.ai-settings-routes p { display: grid; gap: 0.1rem; margin: 0; }
+.ai-settings-routes strong { color: var(--text-primary); font-size: 0.8rem; }
+.ai-settings-routes span { color: var(--text-secondary); font-size: 0.76rem; line-height: 1.45; }
 .ai-settings-summary {
     list-style: none; display: grid; gap: 0.55rem; margin: 0; padding: 0;
 }
@@ -697,6 +824,9 @@ table tr:hover { background: var(--background); }
     border: 1px solid var(--border-color); border-radius: 6px;
     background: #f8fafc; color: #475569; font-size: 0.8rem; line-height: 1.5;
 }
+.ai-settings-after-save {
+    margin: 0; color: #475569; font-size: 0.78rem; line-height: 1.5;
+}
 .ai-settings-status::before {
     content: ''; width: 0.5rem; height: 0.5rem; margin-top: 0.34rem;
     border-radius: 50%; background: #64748b;
@@ -749,6 +879,13 @@ table tr:hover { background: var(--background); }
 .ai-assist-body {
     padding: 1rem; max-height: calc(100vh - 8rem); overflow: auto;
 }
+.ai-assist-floating .beginner-guide { margin: 0 0 0.85rem; padding: 0.8rem; }
+.ai-assist-floating .beginner-guide-steps { grid-template-columns: 1fr; gap: 0.55rem; }
+.ai-assist-floating .beginner-guide-step,
+.ai-assist-floating .beginner-guide-step:first-child {
+    padding: 0.55rem 0 0; border-left: 0; border-top: 1px solid var(--border-color);
+}
+.ai-assist-floating .beginner-guide-step:first-child { padding-top: 0; border-top: 0; }
 .ai-assist-context {
     display: grid; gap: 0.25rem; padding: 0.75rem; border-radius: 8px;
     background: #f8fafc; border: 1px solid var(--border-color);
@@ -774,6 +911,17 @@ table tr:hover { background: var(--background); }
     background: #ecfdf5; border: 1px solid #a7f3d0; color: #166534;
 }
 .ai-assist-storage-note i { margin-top: 0.1rem; color: #059669; }
+.ai-assist-safety-details {
+    margin-bottom: 0.85rem; border: 1px solid var(--border-color); border-radius: 8px;
+    background: #f8fafc; color: var(--text-secondary); font-size: 0.78rem; line-height: 1.5;
+}
+.ai-assist-safety-details summary {
+    padding: 0.65rem 0.75rem; cursor: pointer; color: var(--text-primary); font-weight: 700;
+}
+.ai-assist-safety-details .ai-assist-storage-note {
+    margin: 0 0.75rem 0.65rem; border-radius: 6px;
+}
+.ai-assist-safety-details > p { margin: 0; padding: 0 0.75rem 0.75rem; }
 .ai-assist-privacy-warning {
     background: #fff7ed; border: 1px solid #fdba74; color: #9a3412;
 }
@@ -797,6 +945,12 @@ table tr:hover { background: var(--background); }
 .ai-assist-send-confirmation input { margin-top: 0.15rem; }
 .ai-assist-actions {
     display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;
+}
+.ai-assist-action-option {
+    display: grid; align-content: end; gap: 0.3rem; min-width: 0;
+}
+.ai-assist-action-option > span {
+    color: var(--text-secondary); font-size: 0.7rem; font-weight: 700; text-align: center;
 }
 .ai-assist-copy,
 .ai-assist-generate {
@@ -1215,6 +1369,14 @@ table tr:hover { background: var(--background); }
     .analysis-quality-items { grid-template-columns: minmax(0, 1fr); }
     .analysis-quality-item { min-width: 0; }
     .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+    .beginner-start-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .beginner-start-steps li:nth-child(3) { padding-left: 0; border-left: 0; }
+    .beginner-guide-steps { grid-template-columns: 1fr; gap: 0.65rem; }
+    .beginner-guide-step,
+    .beginner-guide-step:first-child {
+        padding: 0.65rem 0 0; border-left: 0; border-top: 1px solid var(--border-color);
+    }
+    .beginner-guide-step:first-child { padding-top: 0; border-top: 0; }
     .step-indicator { justify-content: flex-start; padding: 1rem 0.75rem; }
     .step-indicator .step { padding: 0.5rem 0.75rem; font-size: 0.8rem; }
     .variable-chip { font-size: 0.775rem; padding: 0.3rem 0.65rem; }
@@ -1242,6 +1404,8 @@ table tr:hover { background: var(--background); }
     .ai-settings-modal-header { padding: 0.85rem 1rem; }
     .ai-settings-scroll { padding: 1rem; }
     .ai-settings-field-grid { grid-template-columns: minmax(0, 1fr); }
+    .ai-settings-routes { grid-template-columns: 1fr; }
+    .ai-settings-routes > div + div { border-left: 0; border-top: 1px solid var(--border-color); }
     .ai-settings-actions {
         display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -1263,9 +1427,19 @@ table tr:hover { background: var(--background); }
 
 /* === Responsive: 480px === */
 @media (max-width: 480px) {
-    .hero-title { font-size: 2rem; }
+    .hero-title { font-size: 1.75rem; overflow-wrap: normal; }
     .hero-subtitle { font-size: 1rem; }
     .metrics-grid { grid-template-columns: 1fr; }
+    .beginner-start { padding: 1rem; }
+    .beginner-start-steps { grid-template-columns: 1fr; }
+    .beginner-start-steps li,
+    .beginner-start-steps li:first-child,
+    .beginner-start-steps li:nth-child(3) {
+        padding: 0.65rem 0; border-left: 0; border-top: 1px solid var(--border-color);
+    }
+    .beginner-start-steps li:first-child { border-top: 0; }
+    .beginner-guide-terms dl > div { grid-template-columns: 1fr; gap: 0.1rem; }
+    .create-model-config-grid { grid-template-columns: 1fr; }
     .step-indicator .step { padding: 0.4rem 0.6rem; font-size: 0.75rem; }
     .step-indicator .step-connector { width: 16px; }
     .metric-card .metric-value { font-size: 1.5rem; }

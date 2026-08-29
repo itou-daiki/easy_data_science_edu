@@ -978,7 +978,7 @@ const JA_TO_EN = new Map(Object.entries({
     'APIキー有効時は、生成した解釈や分析文脈をもとに「この結果をレポート用に短く書くと？」のような追加質問ができます': 'With an API key, you can ask follow-up questions such as “How can I summarize these results in a report?”',
     'コピー内容には、信頼性と妥当性チェック、解釈の注意点、レポート例を求める指示が含まれます': 'The copied prompt requests reliability and validity checks, interpretation cautions, and report examples',
     '指定したGeminiモデルが利用できない場合は、既定モデルへ自動で切り替えます': 'If the selected Gemini model is unavailable, the app automatically uses the default model',
-    '解釈は6節の構造化JSONとして受信し、型、項目数、文字数を検証してから表示します': 'Interpretations are received as six-section structured JSON and displayed only after validating types, item counts, and text lengths',
+    '解釈は8節の構造化JSONとして受信し、型、項目数、文字数を検証してから表示します': 'Interpretations are received as eight-section structured JSON and displayed only after validating types, item counts, and text lengths',
     '回答の末尾で、実際に使われたモデル、総トークン数、互換モデルへの切替を確認できます': 'The response footer shows the model actually used, total token count, and any compatibility fallback',
     '指定したGeminiモデルが利用できない場合だけ、安定版gemini-3.6-flashへ自動で切り替えます': 'Only when the selected Gemini model is unavailable, the app automatically falls back to the stable gemini-3.6-flash model',
     'Interactions APIへの全送信で履歴保存を要求しないstore=falseを指定し、追加質問の履歴はページメモリ内だけで管理します': 'Every Interactions API request sets store=false, and follow-up history is managed only in page memory',

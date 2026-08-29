@@ -17,6 +17,89 @@ export function escapeHtml(value) {
         .replace(/'/g, '&#x27;');
 }
 
+function createBilingualText(value) {
+    const japanese = typeof value === 'object' && value !== null ? value.ja : value;
+    const english = typeof value === 'object' && value !== null ? value.en : value;
+    return `<span data-i18n-en="${escapeHtml(english ?? japanese ?? '')}">${escapeHtml(japanese ?? '')}</span>`;
+}
+
+/**
+ * Creates a compact learning scaffold that tells beginners what a view shows,
+ * where to look, and what to do next.
+ * @param {{
+ *   title?: string|{ja: string, en: string},
+ *   purpose: string|{ja: string, en: string},
+ *   lookFor: string|{ja: string, en: string},
+ *   nextAction: string|{ja: string, en: string},
+ *   caution?: string|{ja: string, en: string},
+ *   terms?: Array<{term: string|{ja: string, en: string}, meaning: string|{ja: string, en: string}}>
+ * }} guide
+ * @returns {string}
+ */
+export function createBeginnerGuide({
+    title = { ja: '迷わないための見方', en: 'How to read this view' },
+    purpose,
+    lookFor,
+    nextAction,
+    caution = '',
+    terms = []
+}) {
+    const steps = [
+        {
+            label: { ja: 'ここで分かること', en: 'What this shows' },
+            text: purpose
+        },
+        {
+            label: { ja: 'まず見る場所', en: 'Where to look first' },
+            text: lookFor
+        },
+        {
+            label: { ja: '次にすること', en: 'What to do next' },
+            text: nextAction
+        }
+    ];
+    const termList = Array.isArray(terms) ? terms.filter(item => item?.term && item?.meaning) : [];
+
+    return `
+        <aside class="beginner-guide">
+            <div class="beginner-guide-heading">
+                <i class="fas fa-compass" aria-hidden="true"></i>
+                <strong>${createBilingualText(title)}</strong>
+            </div>
+            <div class="beginner-guide-steps">
+                ${steps.map((step, index) => `
+                    <div class="beginner-guide-step">
+                        <span class="beginner-guide-number" aria-hidden="true">${index + 1}</span>
+                        <div>
+                            <strong>${createBilingualText(step.label)}</strong>
+                            <p>${createBilingualText(step.text)}</p>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+            ${caution ? `
+                <p class="beginner-guide-caution">
+                    <i class="fas fa-triangle-exclamation" aria-hidden="true"></i>
+                    ${createBilingualText(caution)}
+                </p>
+            ` : ''}
+            ${termList.length > 0 ? `
+                <details class="beginner-guide-terms">
+                    <summary>${createBilingualText({ ja: 'ことばの意味', en: 'Key terms' })}</summary>
+                    <dl>
+                        ${termList.map(item => `
+                            <div>
+                                <dt>${createBilingualText(item.term)}</dt>
+                                <dd>${createBilingualText(item.meaning)}</dd>
+                            </div>
+                        `).join('')}
+                    </dl>
+                </details>
+            ` : ''}
+        </aside>
+    `;
+}
+
 /**
  * Bind an ARIA tab set, including arrow, Home, and End key navigation.
  * Tabs and panels are paired through aria-controls.
@@ -138,7 +221,32 @@ export function renderDataPreview(containerId, data, title = 'データプレビ
     const columns = Object.keys(data[0]);
     const displayData = data.slice(0, maxRows);
 
-    let html = `<div class="table-container"><table class="table">`;
+    let html = createBeginnerGuide({
+        title: { ja: `${title}の見方`, en: 'How to read the data preview' },
+        purpose: {
+            ja: '1行が1件、1列が1つの項目になっているかを確かめる画面です。ここに見えるのは先頭部分だけです。',
+            en: 'Check that each row is one observation and each column is one item. Only the first rows are shown here.'
+        },
+        lookFor: {
+            ja: '列名、値の単位、空欄（N/A）、数値列に混ざった文字を見ます。個人を特定できる情報がないかも確認します。',
+            en: 'Check column names, units, blanks (N/A), text mixed into numeric columns, and any information that could identify a person.'
+        },
+        nextAction: {
+            ja: '表の形が想定どおりなら要約統計量を開き、その後にEDAで欠損・分布・外れ値を確認します。',
+            en: 'If the table looks as expected, open Summary statistics, then use EDA to check missing values, distributions, and outliers.'
+        },
+        terms: [
+            {
+                term: { ja: '行', en: 'Row' },
+                meaning: { ja: '生徒1人、商品1個など、1件分の記録です。', en: 'One observation, such as one student or one product.' }
+            },
+            {
+                term: { ja: '列', en: 'Column' },
+                meaning: { ja: '点数、価格、種類など、記録する項目です。', en: 'One recorded item, such as a score, price, or category.' }
+            }
+        ]
+    });
+    html += `<div class="table-container"><table class="table">`;
     html += '<thead data-i18n-ignore><tr>';
     html += '<th>#</th>';
     columns.forEach(col => html += `<th>${escapeHtml(col)}</th>`);
@@ -148,14 +256,14 @@ export function renderDataPreview(containerId, data, title = 'データプレビ
         html += `<tr><td>${i + 1}</td>`;
         columns.forEach(col => {
             const val = row[col];
-            html += `<td>${val != null ? escapeHtml(val) : '<span style="color:#94a3b8;">N/A</span>'}</td>`;
+            html += `<td>${val != null && val !== '' ? escapeHtml(val) : '<span style="color:#64748b;">N/A</span>'}</td>`;
         });
         html += '</tr>';
     });
 
     html += '</tbody></table></div>';
     if (data.length > maxRows) {
-        html += `<p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.5rem;">先頭 ${maxRows} 行を表示（全 ${data.length} 行）</p>`;
+        html += `<p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.5rem;"><span data-i18n-en="Showing the first ${maxRows} rows (${data.length} rows total)">先頭 ${maxRows} 行を表示（全 ${data.length} 行）</span></p>`;
     }
     container.innerHTML = html;
 }
@@ -173,7 +281,12 @@ export function renderSummaryStatistics(containerId, data, characteristics, titl
 
     const numCols = characteristics.numericColumns;
     if (numCols.length === 0) {
-        container.innerHTML = '<p style="color: var(--text-secondary);">数値変数がありません。</p>';
+        container.innerHTML = createBeginnerGuide({
+            title: { ja: `${title}の見方`, en: 'How to read summary statistics' },
+            purpose: { ja: '数値の列を短くまとめる画面です。', en: 'This view gives a compact summary of numeric columns.' },
+            lookFor: { ja: 'このデータには数値として認識された列がありません。', en: 'No columns in this dataset were recognized as numeric.' },
+            nextAction: { ja: '数値を分析したい場合は、単位や文字が混ざっていないか元データを確認します。', en: 'To analyze numeric values, check the source data for units or text mixed into the values.' }
+        });
         return;
     }
 
@@ -194,7 +307,36 @@ export function renderSummaryStatistics(containerId, data, characteristics, titl
         return { col, count: n, mean, std, min: sorted[0], q1, median, q3, max: sorted[n - 1], missing };
     });
 
-    let html = '<div class="table-container"><table class="table">';
+    let html = createBeginnerGuide({
+        title: { ja: `${title}の見方`, en: 'How to read summary statistics' },
+        purpose: {
+            ja: '各数値列の中心、ばらつき、範囲、欠損を1つの表で比べる画面です。',
+            en: 'Compare the center, spread, range, and missing values of each numeric column in one table.'
+        },
+        lookFor: {
+            ja: '平均と中央値が大きく違う列、標準偏差や最小・最大の幅が大きい列、欠損がある列に注目します。',
+            en: 'Look for columns where mean and median differ, spread or range is large, or missing values are present.'
+        },
+        nextAction: {
+            ja: '気になる列名を覚えてEDAの「分布」と「欠損値」で形を確かめます。数字だけで異常と決めつけないでください。',
+            en: 'Note any concerning columns and inspect them under Distribution and Missing values in EDA. Do not label a value abnormal from this table alone.'
+        },
+        terms: [
+            {
+                term: { ja: '中央値', en: 'Median' },
+                meaning: { ja: '小さい順に並べた中央の値です。極端な値の影響を平均より受けにくい指標です。', en: 'The middle value after sorting. It is less affected by extreme values than the mean.' }
+            },
+            {
+                term: { ja: '標準偏差', en: 'Standard deviation' },
+                meaning: { ja: '値の散らばり方の目安です。大きいほど平均から広く散らばっています。', en: 'A measure of spread. Larger values indicate observations are more widely dispersed around the mean.' }
+            },
+            {
+                term: { ja: 'Q1 / Q3', en: 'Q1 / Q3' },
+                meaning: { ja: '小さい側から25%点と75%点の値で、中央50%の範囲を見るために使います。', en: 'The 25th and 75th percentiles, used to describe the middle 50% of values.' }
+            }
+        ]
+    });
+    html += '<div class="table-container"><table class="table">';
     html += '<thead><tr><th>変数</th><th>件数</th><th>平均</th><th>標準偏差</th><th>最小</th><th>Q1</th><th>中央値</th><th>Q3</th><th>最大</th><th>欠損</th></tr></thead><tbody>';
     stats.forEach(s => {
         const fmt = v => typeof v === 'number' ? v.toFixed(3) : v;
@@ -378,7 +520,7 @@ export function renderConfusionMatrix(containerId, matrix, labels) {
         title: '混同行列',
         xaxis: { title: '予測値', side: 'bottom' },
         yaxis: { title: '実測値', autorange: 'reversed' },
-        width: 450,
+        autosize: true,
         height: 400
     };
     renderPlot(containerId, data, layout);

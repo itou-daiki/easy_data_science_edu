@@ -123,6 +123,22 @@
                     <p class="ai-settings-lead">
                         分析結果の解釈をGeminiに依頼するための接続設定です。APIキーなしでも、分析結果ページの「AI用テキストをコピー」は使えます。
                     </p>
+                    <div class="ai-settings-role-note">
+                        <strong data-i18n-en="What AI does">AIがすること</strong>
+                        <span data-i18n-en="It explains the results already shown in beginner-friendly language and suggests checks to do next.">表示済みの結果を初学者向けに言い換え、次に確認することを提案します。</span>
+                        <strong data-i18n-en="What AI does not do">AIがしないこと</strong>
+                        <span data-i18n-en="It does not rerun the model or guarantee that an interpretation is correct.">モデルを再計算したり、解釈の正しさを保証したりはしません。</span>
+                    </div>
+                    <div class="ai-settings-routes" aria-label="生成AI支援の使い分け">
+                        <div>
+                            <i class="fas fa-copy" aria-hidden="true"></i>
+                            <p><strong data-i18n-en="Without an API key">APIキーなし</strong><span data-i18n-en="Copy the prepared text on a result page and paste it into another AI.">結果ページでAI用テキストをコピーし、別のAIへ貼り付けます。</span></p>
+                        </div>
+                        <div>
+                            <i class="fas fa-key" aria-hidden="true"></i>
+                            <p><strong data-i18n-en="With a Gemini API key">Gemini APIキーあり</strong><span data-i18n-en="Generate an interpretation and ask follow-up questions directly in the result panel.">結果パネル内で解釈を生成し、続けて質問できます。</span></p>
+                        </div>
+                    </div>
                     <ul class="ai-settings-summary">
                         <li><i class="fas fa-key" aria-hidden="true"></i><span>APIキーはページのメモリ内だけに保持され、再読み込みすると消えます。</span></li>
                         <li><i class="fas fa-paper-plane" aria-hidden="true"></i><span>送信は「解釈を生成」または追加質問を押したときだけです。</span></li>
@@ -137,7 +153,7 @@
                 <form class="ai-settings-form" onsubmit="return false;">
                     <section class="ai-settings-section" aria-labelledby="ai-settings-connection-title">
                         <div class="ai-settings-section-heading">
-                            <h4 id="ai-settings-connection-title">接続情報</h4>
+                            <h4 id="ai-settings-connection-title" data-i18n-en="1. Connection details">1. 接続情報</h4>
                             <span class="ai-settings-required">必須</span>
                         </div>
                         <div class="ai-settings-field-grid">
@@ -163,7 +179,7 @@
                     </section>
 
                     <fieldset class="ai-settings-section ai-settings-preview-section">
-                        <legend>送信するデータ</legend>
+                        <legend data-i18n-en="2. Data to send">2. 送信するデータ</legend>
                         <label class="ai-preview-option" for="gemini-include-preview-input">
                             <input type="checkbox" id="gemini-include-preview-input" aria-describedby="gemini-preview-hint">
                             <span class="ai-preview-copy">
@@ -172,6 +188,10 @@
                             </span>
                         </label>
                     </fieldset>
+
+                    <p class="ai-settings-after-save" data-i18n-en="3. After enabling, open an analysis result, review the exact payload, confirm that it contains no personal or confidential information, and only then send it.">
+                        3. 有効化後は分析結果を開き、実際の送信内容を確認し、個人情報・機密情報がないことを確かめてから送信します。
+                    </p>
 
                     <div id="ai-settings-status" class="ai-settings-status" role="status" aria-live="polite" aria-atomic="true"></div>
 
@@ -230,6 +250,48 @@
             <p class="hero-caption">Created by Dit-Lab. (Daiki ITO)</p>
             <p class="hero-subtitle">ブラウザ上で簡単に機械学習　- PyCaret ライクな自動 ML を手軽に -</p>
         </div>
+
+        <section class="beginner-start" aria-labelledby="beginner-start-title">
+            <div class="beginner-start-header">
+                <p class="beginner-start-kicker" data-i18n-en="FIRST ANALYSIS">はじめての分析</p>
+                <h2 id="beginner-start-title" data-i18n-en="Start in this order">この順番なら迷いません</h2>
+                <p data-i18n-en="You do not need to understand every term first. Complete one step, then move to the next.">最初から用語を全部覚える必要はありません。1つ確認したら次へ進みます。</p>
+            </div>
+            <ol class="beginner-start-steps">
+                <li>
+                    <span class="beginner-start-step-number" aria-hidden="true">1</span>
+                    <div>
+                        <strong data-i18n-en="Load data">データを読み込む</strong>
+                        <p data-i18n-en="No file yet? Choose Try demo data.">手元にファイルがなければ「デモデータを試す」を選びます。</p>
+                    </div>
+                </li>
+                <li>
+                    <span class="beginner-start-step-number" aria-hidden="true">2</span>
+                    <div>
+                        <strong data-i18n-en="Check the table">表の形を確認</strong>
+                        <p data-i18n-en="Open Data preview and Summary statistics.">「データプレビュー」と「要約統計量」を開きます。</p>
+                    </div>
+                </li>
+                <li>
+                    <span class="beginner-start-step-number" aria-hidden="true">3</span>
+                    <div>
+                        <strong data-i18n-en="Explore before predicting">予測前に探索</strong>
+                        <p data-i18n-en="Use EDA to inspect distributions, missing values, and unusual observations.">EDAで分布・欠損・気になる値を確かめます。</p>
+                    </div>
+                </li>
+                <li>
+                    <span class="beginner-start-step-number" aria-hidden="true">4</span>
+                    <div>
+                        <strong data-i18n-en="Choose the goal">予測の目的を選ぶ</strong>
+                        <p data-i18n-en="Choose regression for a number or classification for a category.">数値なら回帰、種類なら分類へ進みます。</p>
+                    </div>
+                </li>
+            </ol>
+            <p class="beginner-start-choice">
+                <strong data-i18n-en="Quick choice:">すぐ選ぶなら:</strong>
+                <span data-i18n-en="numeric target = regression / category target = classification / no prediction yet = EDA">予測したいものが数値 = 回帰 / 種類 = 分類 / まだ予測しない = EDA</span>
+            </p>
+        </section>
 
         <!-- Data Upload Section -->
         <div class="upload-section-main" id="upload-section-main">

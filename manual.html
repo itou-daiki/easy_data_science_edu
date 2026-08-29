@@ -248,6 +248,11 @@
             font-size: 0.9rem;
         }
 
+        .manual-table-wrap {
+            max-width: 100%;
+            overflow-x: auto;
+        }
+
         .manual-table th,
         .manual-table td {
             border: 1px solid #cbd5e1;
@@ -313,6 +318,12 @@
                 padding: 1.35rem;
             }
         }
+
+        @media (max-width: 480px) {
+            .manual-hero h1 {
+                font-size: 1.6rem;
+            }
+        }
     </style>
 </head>
 
@@ -366,6 +377,7 @@
                 <a class="manual-link" href="#reading"><i class="fas fa-chart-bar"></i> 結果の見方</a>
                 <a class="manual-link" href="#trouble"><i class="fas fa-triangle-exclamation"></i> FAQ</a>
                 <a class="manual-link" href="#checklist"><i class="fas fa-list-check"></i> チェックリスト</a>
+                <a class="manual-link" href="#sources"><i class="fas fa-link"></i> <span data-i18n-en="References">参考資料</span></a>
             </div>
         </nav>
 
@@ -440,13 +452,22 @@
                     <li>必要に応じてブレンド、スタッキング、ファイナライズを行う。テスト開示後の追加比較は探索的に扱う</li>
                     <li>predict_model または予測モードで新しいデータを予測する</li>
                 </ol>
+                <h3 data-i18n-en="When you feel lost, answer these three questions">迷ったときは、この3問に答える</h3>
+                <div class="manual-alert">
+                    <ol>
+                        <li data-i18n-en="What do I want to know? A number means regression; a category means classification; understanding the data first means EDA.">何を知りたい？ 数値なら回帰、種類なら分類、まずデータを知るならEDAです。</li>
+                        <li data-i18n-en="Which displayed value supports my statement? Point to a specific metric, table cell, or graph.">どの表示値が根拠？ 指標、表のセル、グラフの位置を具体的に示します。</li>
+                        <li data-i18n-en="What is still unknown, and what will I check next? Review missing data, error patterns, evaluation design, or new independent data.">まだ分からないことと、次に何を確認する？ 欠損、誤り方、評価方法、新しい独立データを確認します。</li>
+                    </ol>
+                </div>
             </section>
 
             <section id="data-rules" class="manual-section">
                 <h2><i class="fas fa-table"></i> 4. 正しいデータ表の作り方</h2>
                 <p>機械学習では、データの形が結果の信頼性に直結します。読み込み前に、機械が解釈しやすい表へ整えてください。</p>
                 <h3>良い例</h3>
-                <table class="manual-table">
+                <div class="manual-table-wrap" tabindex="0" aria-label="良い例">
+                    <table class="manual-table">
                     <thead>
                         <tr>
                             <th data-i18n-en="Floor area">面積</th>
@@ -461,7 +482,8 @@
                         <tr><td>80</td><td>5</td><td>4</td><td>4</td><td>6100</td></tr>
                         <tr><td>45</td><td>25</td><td>15</td><td>2</td><td>2800</td></tr>
                     </tbody>
-                </table>
+                    </table>
+                </div>
                 <ul>
                     <li>1行目は列名だけにする</li>
                     <li>2行目以降にデータを入れる</li>
@@ -533,6 +555,10 @@
                 </ol>
                 <h3>搭載モデル</h3>
                 <p>線形回帰、Ridge回帰、Lasso回帰、決定木、ランダムフォレスト、K近傍法、勾配ブースティング。</p>
+                <div class="manual-alert">
+                    <strong data-i18n-en="Reading order:">見る順番:</strong>
+                    <span data-i18n-en="Choose a candidate with mean CV R² and fold SD → reveal the final test once → read MAE in the target unit → compare RMSE → inspect residuals and intervals → decide whether the error is acceptable for the intended use.">CV R²平均とfold間SDで候補を決める → 最終テストを1回だけ開示 → 目的変数と同じ単位でMAEを読む → RMSEとの差を見る → 残差と区間を確認 → 用途で誤差を許容できるか決めます。</span>
+                </div>
             </section>
 
             <section id="classification" class="manual-section">
@@ -556,6 +582,10 @@
                 <div class="manual-alert manual-warning">
                     クラス不均衡がある場合は、Accuracy だけでなく F1、Precision、Recall、混同行列を確認してください。
                 </div>
+                <div class="manual-alert">
+                    <strong data-i18n-en="Reading order:">見る順番:</strong>
+                    <span data-i18n-en="Choose a candidate with mean CV Macro F1 and fold SD → reveal the final test once → inspect the confusion matrix and per-class recall → emphasize recall for costly misses or precision for costly false alarms → compare with class counts and the no-skill baseline.">CV Macro F1平均とfold間SDで候補を決める → 最終テストを1回だけ開示 → 混同行列とクラス別Recallを見る → 見逃しが重いならRecall、誤警報が重いならPrecisionを重視 → クラス件数と無情報基準も比べます。</span>
+                </div>
             </section>
 
             <section id="workflow" class="manual-section">
@@ -572,7 +602,7 @@
 
             <section id="ai-assist" class="manual-section">
                 <h2><i class="fas fa-wand-magic-sparkles"></i> 11. 生成AI支援</h2>
-                <p>分析結果ページのフローティングパネルから、結果の読み取りを補助するAI用テキストを作成できます。</p>
+                <p data-i18n-en="The floating panel on an analysis result page helps you read results. AI explains the displayed context; it does not rerun the analysis or guarantee that an interpretation is correct.">分析結果ページのフローティングパネルで、結果の読み取りを補助できます。AIは表示済みの文脈を説明するもので、分析を再実行したり解釈の正しさを保証したりはしません。</p>
                 <div class="manual-grid">
                     <div class="manual-card">
                         <h4>APIキーなしで使う</h4>
@@ -591,7 +621,7 @@
                     <li>送信前にパネルの「Geminiへの送信内容を確認」を開き、個人情報・機密情報がないことを確認するチェックが必要です</li>
                     <li>プレビューを無効にしても、列名・クラス名・要約統計・分析結果は送信されます</li>
                     <li>APIキー有効時は、生成した解釈や分析文脈をもとに「この結果をレポート用に短く書くと？」のような追加質問ができます</li>
-                    <li>解釈は6節の構造化JSONとして受信し、型、項目数、文字数を検証してから表示します</li>
+                    <li data-i18n-en="Interpretations are received as structured JSON with eight sections and displayed only after validating types, item counts, and text lengths.">解釈は8節の構造化JSONとして受信し、型、項目数、文字数を検証してから表示します</li>
                     <li>回答の末尾で、実際に使われたモデル、総トークン数、互換モデルへの切替を確認できます</li>
                     <li>指定したGeminiモデルが利用できない場合だけ、安定版gemini-3.6-flashへ自動で切り替えます</li>
                     <li>APIキーはJavaScriptのメモリ内にだけ保持され、再読み込みまたはページを閉じると消えます</li>
@@ -600,6 +630,14 @@
                     <li>入力データは信頼できない文脈として区切られますが、個人情報・機密情報は送信しないでください</li>
                     <li>生成AIの説明には誤りがあり得ます。元の指標、データ、授業資料と照合してください</li>
                 </ul>
+                <h3 data-i18n-en="How to read an AI interpretation">AIの解釈を読む順番</h3>
+                <ol>
+                    <li data-i18n-en="Read “In one sentence,” then locate the same numbers in the original result.">「まず一言で」を読み、同じ数値を元の結果から探します。</li>
+                    <li data-i18n-en="Use “Key terms” for unfamiliar words; do not skip terms you cannot explain yourself.">分からない言葉は「ことばの意味」で確認し、自分で説明できない言葉を飛ばさないようにします。</li>
+                    <li data-i18n-en="Separate supported findings from cautions and unknowns under reliability and validity.">「信頼性と妥当性」で、根拠のある内容、注意、分からないことを分けます。</li>
+                    <li data-i18n-en="Carry out the three next steps in order and record what changed or what you learned.">「次の一歩」の3項目を順に行い、何が変わったか、何が分かったかを記録します。</li>
+                    <li data-i18n-en="Use the report example only after confirming that every number and limitation matches the screen.">レポート例は、すべての数値と限界が画面と一致することを確認してから使います。</li>
+                </ol>
             </section>
 
             <section id="prediction-mode" class="manual-section">
@@ -711,7 +749,21 @@
                     <li>時系列・反復測定・グループ構造の有無を確認した</li>
                     <li>モデル保存が必要な場合はファイナライズ後に JSON をダウンロードする</li>
                 </ul>
-                <p style="margin-top: 1.5rem; color: #64748b;">最終更新: 2026-08-29</p>
+                <p style="margin-top: 1.5rem; color: #64748b;">最終更新: 2026-08-30</p>
+            </section>
+
+            <section id="sources" class="manual-section">
+                <h2><i class="fas fa-link"></i> <span data-i18n-en="19. Primary references used for the learning guidance">19. 学習案内で参照した一次資料</span></h2>
+                <p data-i18n-en="The in-app guidance was designed from the following official sources. The wording in this manual is an educational adaptation for this application, not a quotation or a universal decision threshold.">画面内の案内は、次の公式資料を根拠に設計しました。本マニュアルの表現はこのアプリ向けの教育的な整理であり、引用や一律の判定基準ではありません。</p>
+                <ul>
+                    <li><a href="https://www.w3.org/WAI/tips/writing/" target="_blank" rel="noopener noreferrer">W3C WAI: Writing for Web Accessibility</a> - <span data-i18n-en="clear instructions, short text, and meaningful headings">明確な指示、短い文章、意味の分かる見出し</span></li>
+                    <li><a href="https://udlguidelines.cast.org/" target="_blank" rel="noopener noreferrer">CAST UDL Guidelines 3.0</a> - <span data-i18n-en="clarifying vocabulary, action-oriented feedback, and monitoring progress">語彙の明確化、行動につながるフィードバック、進捗の確認</span></li>
+                    <li><a href="https://itl.nist.gov/div898/handbook/eda/section1/eda11.htm" target="_blank" rel="noopener noreferrer">NIST/SEMATECH: What is EDA?</a> - <span data-i18n-en="finding structure, important variables, outliers, and assumption problems">構造、重要変数、外れ値、仮定上の問題の探索</span></li>
+                    <li><a href="https://scikit-learn.org/stable/modules/model_evaluation.html" target="_blank" rel="noopener noreferrer">scikit-learn: Model evaluation</a> / <a href="https://scikit-learn.org/stable/common_pitfalls.html" target="_blank" rel="noopener noreferrer">Common pitfalls</a> - <span data-i18n-en="choosing metrics for the task and preventing data leakage">目的に合う指標選択とデータリークの防止</span></li>
+                    <li><a href="https://ai.google.dev/gemini-api/docs/prompting-strategies" target="_blank" rel="noopener noreferrer">Google Gemini API: Prompt design strategies</a> / <a href="https://ai.google.dev/gemini-api/docs/safety-guidance" target="_blank" rel="noopener noreferrer">Safety guidance</a> - <span data-i18n-en="clear prompts, structured responses, and human verification">明確な指示、構造化回答、人による検証</span></li>
+                    <li><a href="https://www.unesco.org/en/articles/ai-competency-framework-students" target="_blank" rel="noopener noreferrer">UNESCO: AI competency framework for students</a> - <span data-i18n-en="human-centered, age-appropriate, critical use of AI">人間中心、年齢に応じた、批判的なAI活用</span></li>
+                </ul>
+                <p data-i18n-en="Sources checked: August 30, 2026.">確認日: 2026年8月30日。</p>
             </section>
         </main>
     </div>

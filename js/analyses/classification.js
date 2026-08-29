@@ -2,7 +2,7 @@
 // 分類モデル比較 (AutoML) Module
 // PyCaret-style: setup → compare_models (CV) → tune_model → predict_model
 // ==========================================
-import { createSelect, createStepIndicator, escapeHtml, formatNumber, renderPlot, renderConfusionMatrix, renderROCCurve, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton, makeExportFileName, renderDataPreview, renderSummaryStatistics, downloadJSON, serializeModel, makeModelFileName } from '../utils.js';
+import { createSelect, createStepIndicator, createBeginnerGuide, escapeHtml, formatNumber, renderPlot, renderConfusionMatrix, renderROCCurve, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton, makeExportFileName, renderDataPreview, renderSummaryStatistics, downloadJSON, serializeModel, makeModelFileName } from '../utils.js';
 import { buildAnalysisContext, renderAIAssistPanel } from '../ai_assistant.js';
 import { buildAnalysisQualityReport, getAnalysisQualityNotes, renderAnalysisQualityPanel } from '../analysis_quality.js';
 import { kernelSHAP, shapSummary } from '../ml/shap.js';
@@ -113,6 +113,18 @@ export function render(container, data, characteristics) {
             PyCaret のように複数の分類モデルを一括学習・比較し、最適なモデルを見つけます。
         </p>
 
+        ${createBeginnerGuide({
+            title: { ja: '分類分析の進め方', en: 'How to proceed with classification' },
+            purpose: { ja: '合格・不合格や品種のように、数ではなく種類を予測するモデルを比べます。', en: 'Compare models that predict categories rather than numbers, such as pass/fail or species.' },
+            lookFor: { ja: 'まず「予測したい種類」を目的変数にします。二値分類では、特に見つけたい側を陽性クラスとして確認します。', en: 'First choose the category to predict as the target. For binary classification, confirm the positive class you especially want to detect.' },
+            nextAction: { ja: '目的変数を選び、クラス数・陽性クラス・特徴量を確認して「モデル比較を開始」を押します。', en: 'Choose the target, review class count, positive class, and features, then select Start model comparison.' },
+            caution: { ja: '未来のデータは時系列、同じ人や学校の反復データはグループ非重複を選びます。少数クラスの件数も必ず確認します。', en: 'Use a time split for future observations and a non-overlapping group split for repeated people or schools. Always check the size of minority classes.' },
+            terms: [
+                { term: { ja: 'クラス', en: 'Class' }, meaning: { ja: '予測する種類の1つです。例: 合格、不合格。', en: 'One possible category to predict, such as pass or fail.' } },
+                { term: { ja: '陽性クラス', en: 'Positive class' }, meaning: { ja: '二値分類で「見つけたい対象」として指標を読む側です。病気とは限りません。', en: 'The class treated as the event to detect in binary metrics. It does not have to mean illness.' } }
+            ]
+        })}
+
         ${createStepIndicator(STEPS, 0)}
 
         <div id="data-overview-section" style="margin-bottom: 1.5rem;">
@@ -180,7 +192,8 @@ export function render(container, data, characteristics) {
                 </label>
                 <div id="feature-chips" class="variable-chips"></div>
             </div>
-            <button id="btn-compare" class="btn-analysis" style="background: #0891b2;" disabled>
+            <p id="cls-next-step-status" class="beginner-next-status" role="status" aria-live="polite" data-i18n-en="First, choose one target variable.">まず目的変数を1つ選んでください。</p>
+            <button id="btn-compare" class="btn-analysis" style="background: #0891b2;" disabled title="目的変数を選択すると開始できます">
                 <i class="fas fa-play"></i> モデル比較を開始
             </button>
         </div>
@@ -211,6 +224,7 @@ export function render(container, data, characteristics) {
     const splitColumnLabel = container.querySelector('#split-column-label');
     const splitColumnSelect = container.querySelector('#split-column-select');
     const splitGapWrapper = container.querySelector('#split-gap-wrapper');
+    const nextStepStatus = container.querySelector('#cls-next-step-status');
 
     targetSelect.addEventListener('change', () => {
         const target = targetSelect.value;
@@ -219,6 +233,9 @@ export function render(container, data, characteristics) {
             btnCompare.disabled = true;
             targetInfo.innerHTML = '';
             positiveClassWrapper.style.display = 'none';
+            btnCompare.title = '目的変数を選択すると開始できます';
+            nextStepStatus.dataset.i18nEn = 'First, choose one target variable.';
+            nextStepStatus.textContent = 'まず目的変数を1つ選んでください。';
             return;
         }
 
@@ -257,6 +274,8 @@ export function render(container, data, characteristics) {
             featureChips.innerHTML = '<p style="color: #ef4444;">使用できる特徴量がありません。</p>';
             featureSelection.style.display = 'block';
             btnCompare.disabled = true;
+            nextStepStatus.dataset.i18nEn = 'At least one feature besides the target is required.';
+            nextStepStatus.textContent = '目的変数以外に、予測の手がかりとなる特徴量が1つ以上必要です。';
             return;
         }
 
@@ -276,6 +295,9 @@ export function render(container, data, characteristics) {
 
         featureSelection.style.display = 'block';
         btnCompare.disabled = false;
+        btnCompare.removeAttribute('title');
+        nextStepStatus.dataset.i18nEn = `The target is "${target}" with ${unique.length} classes. Review the features, then start model comparison.`;
+        nextStepStatus.textContent = `目的変数は「${target}」、クラス数は${unique.length}です。特徴量を確認したら、モデル比較を開始してください。`;
     });
 
     splitStrategySelect.addEventListener('change', () => targetSelect.dispatchEvent(new Event('change')));
@@ -527,12 +549,34 @@ async function runComparison(container, data, characteristics) {
 function renderComparisonResults(container, results, yTest, featureNames, classes, classLabels) {
     const comparisonDiv = container.querySelector('#comparison-results');
     const bestCV = Math.max(...results.filter(r => r.model).map(r => r.cvMean));
+    const successful = results.filter(result => result.model);
+    const bestModel = successful[0];
+    const secondModel = successful[1];
+    const scoreGap = bestModel && secondModel ? bestModel.cvMean - secondModel.cvMean : null;
     let html = `
         <h3 style="margin-top: 1rem;"><i class="fas fa-trophy" style="color: #0891b2;"></i> モデル比較結果</h3>
         <p style="color: var(--text-secondary); margin-bottom: 1rem;">
             ${_state.cvFolds}-Fold ${getCvMethodLabel()}（foldごとに前処理をfit）のMacro F1平均でソートしています。fold間SDは信頼区間ではありません。
             最終テスト ${yTest.length} 件はモデル選択が終わるまで未開封です。
         </p>
+        ${createBeginnerGuide({
+            title: { ja: '比較表の読み方', en: 'How to read the comparison table' },
+            purpose: { ja: '未使用テストを見ずに、すべてのクラスを同じ重みで見るMacro F1により候補を比べます。', en: 'Compare candidates with Macro F1, which gives each class equal weight, while keeping final test data unseen.' },
+            lookFor: {
+                ja: bestModel
+                    ? `現在の1位は${bestModel.name}で、CV Macro F1平均は${formatNumber(bestModel.cvMean)}、fold間SDは${formatNumber(bestModel.cvStd)}です${scoreGap != null ? `。2位との差は${formatNumber(scoreGap)}です` : ''}。`
+                    : '正常に評価できたモデルがありません。エラー表示、クラス件数、データ条件を確認します。',
+                en: bestModel
+                    ? `${bestModel.name} currently ranks first with mean CV Macro F1 ${formatNumber(bestModel.cvMean)} and fold SD ${formatNumber(bestModel.cvStd)}${scoreGap != null ? `. The gap from second place is ${formatNumber(scoreGap)}` : ''}.`
+                    : 'No model was evaluated successfully. Review errors, class counts, and data conditions.'
+            },
+            nextAction: { ja: '上位モデルの「詳細」を見て、平均だけでなくばらつきとモデルの複雑さも比べます。候補を決めてから最終テストを開示します。', en: 'Open Details for the leading models and compare variability and complexity as well as the mean. Choose a candidate before revealing the final test.' },
+            caution: { ja: 'Macro F1の差が小さいときは順位を絶対視しません。どの誤りを減らしたいかは、最終的にPrecision・Recall・混同行列で判断します。', en: 'Do not overstate small Macro F1 differences. Ultimately use precision, recall, and the confusion matrix to decide which errors matter most.' },
+            terms: [{
+                term: { ja: 'Macro F1', en: 'Macro F1' },
+                meaning: { ja: '各クラスのF1を同じ重みで平均します。人数の少ないクラスも無視しにくい指標です。', en: 'The unweighted average F1 across classes, helping prevent small classes from being ignored.' }
+            }]
+        })}
         <div class="table-container">
             <table class="table model-comparison-table">
                 <thead>
@@ -593,9 +637,9 @@ function renderComparisonResults(container, results, yTest, featureNames, classe
         });
     }
 
-    const bestModel = results.find(r => r.model);
-    if (bestModel) {
-        showModelDetail(container, bestModel, yTest, featureNames, classes, classLabels);
+    const selectedBestModel = results.find(r => r.model);
+    if (selectedBestModel) {
+        showModelDetail(container, selectedBestModel, yTest, featureNames, classes, classLabels);
     }
 }
 
@@ -718,6 +762,30 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
     evalContent.innerHTML = `
         <h3><i class="fas fa-chart-bar" style="color: #0891b2;"></i> ${result.name} の詳細評価</h3>
 
+        ${createBeginnerGuide({
+            title: { ja: '分類性能の読み方', en: 'How to read classification performance' },
+            purpose: { ja: '何件当たったかだけでなく、どのクラスをどのクラスに間違えたかを確認します。', en: 'Check not only how often the model was correct, but which classes were confused with which others.' },
+            lookFor: _state.holdoutRevealed
+                ? {
+                    ja: `最終テストではAccuracy=${formatNumber(result.acc)}、Macro F1=${formatNumber(result.f1)}、MCC=${formatNumber(result.mcc)}です。まず混同行列とクラス別Recallを見ます。`,
+                    en: `On the final test, Accuracy=${formatNumber(result.acc)}, Macro F1=${formatNumber(result.f1)}, and MCC=${formatNumber(result.mcc)}. Start with the confusion matrix and per-class recall.`
+                }
+                : {
+                    ja: `まだ最終テストは見ていません。CV Macro F1=${formatNumber(result.cvMean)}とfold間SD=${formatNumber(result.cvStd)}は候補選び用です。`,
+                    en: `The final test is still unseen. CV Macro F1=${formatNumber(result.cvMean)} and fold SD=${formatNumber(result.cvStd)} are for candidate selection.`
+                },
+            nextAction: _state.holdoutRevealed
+                ? { ja: '見逃しを減らしたいならRecall、誤警報を減らしたいならPrecisionを重視し、用途で許容できる間違いかを決めます。その後にモデル解釈へ進みます。', en: 'Prioritize recall to reduce misses or precision to reduce false alarms, then decide whether the error pattern is acceptable for the application. Continue to model interpretation afterward.' }
+                : { ja: 'このモデルを最終候補にするなら「最終テストを開示」を1回だけ押します。まだ調整するなら先にCVで行います。', en: 'If this is the final candidate, reveal the final test once. If more tuning is needed, do it first using CV.' },
+            caution: { ja: 'Accuracyが高くても少数クラスをほとんど見つけられない場合があります。クラス別件数と混同行列を必ず合わせて見ます。', en: 'Accuracy can be high even when a minority class is rarely detected. Always review class counts and the confusion matrix.' },
+            terms: [
+                { term: { ja: 'Precision', en: 'Precision' }, meaning: { ja: '陽性と予測した中で、本当に陽性だった割合です。誤警報を減らしたいときに重視します。', en: 'Among predicted positives, the share that was truly positive. Emphasize it when false alarms are costly.' } },
+                { term: { ja: 'Recall', en: 'Recall' }, meaning: { ja: '本当の陽性のうち、見つけられた割合です。見逃しを減らしたいときに重視します。', en: 'Among true positives, the share detected. Emphasize it when misses are costly.' } },
+                { term: { ja: 'MCC', en: 'MCC' }, meaning: { ja: '-1から1の指標で、クラスの偏りがあるときも予測と正解の一致を全体的に見ます。', en: 'A metric from -1 to 1 that summarizes agreement between predictions and truth, including with imbalanced classes.' } },
+                { term: { ja: '混同行列', en: 'Confusion matrix' }, meaning: { ja: '正解クラスと予測クラスの組み合わせを件数で示す表です。間違いの種類を確認できます。', en: 'A count table of true versus predicted classes, showing the types of mistakes.' } }
+            ]
+        })}
+
         <div class="metrics-grid" style="margin: 1.5rem 0;">
             ${createMetricCard('CV Macro F1', result.cvMean, `${_state.cvFolds}-Fold 前処理込みCV平均`)}
             ${createMetricCard('fold間SD', result.cvStd, 'foldスコアの標準偏差（信頼区間ではない）')}
@@ -753,7 +821,7 @@ function showModelDetail(container, result, yTest, featureNames, classes, classL
             <p style="color: #92400e; margin: 0.5rem 0;">
                 特定のモデルをパラメータ指定で作成・学習します。Compare の結果を踏まえ、詳細にモデルを構築できます。
             </p>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+            <div class="create-model-config-grid">
                 <div>
                     <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">モデルを選択:</label>
                     <select id="create-model-select" class="form-select">
@@ -984,11 +1052,11 @@ function updateCreateModelParams(container, modelIndex) {
     }
 
     paramFields.innerHTML = paramEntries.map(([key, defaultVal]) => `
-        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
-            <label style="font-size: 0.85rem; min-width: 100px;">${key}:</label>
+        <div class="create-param-row">
+            <label>${key}:</label>
             <input type="number" id="create-param-${key}" class="form-select"
                    value="${defaultVal}" step="any"
-                   style="width: 120px; font-size: 0.85rem;">
+                   >
         </div>
     `).join('');
 }
@@ -1212,6 +1280,13 @@ async function runInterpretModel(container, result, featureNames) {
 
     try {
         let html = '<div style="background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1rem;">';
+        html += createBeginnerGuide({
+            title: { ja: 'モデル解釈の進め方', en: 'How to interpret the model' },
+            purpose: { ja: 'モデルがどの特徴量を手がかりにクラスを分けたかを、全体と1件ごとの両方から調べます。', en: 'Examine which features the model used to separate classes, both overall and for individual predictions.' },
+            lookFor: { ja: '重要度で注目列を見つけ、PDPでクラス確率との関係、学習曲線で過学習、SHAPで各予測への寄与を確認します。', en: 'Use importance to find notable features, PDP for class-probability patterns, learning curves for overfitting, and SHAP for individual contributions.' },
+            nextAction: { ja: '上位特徴量がID・答えの写し・予測時には得られない未来情報でないかを確認し、クラスごとの誤りと結び付けて見ます。', en: 'Check that leading features are not identifiers, copies of the answer, or future information unavailable at prediction time, then connect them to class-specific errors.' },
+            caution: { ja: '重要度・PDP・SHAPはモデルの判断を説明するもので、現実の原因や公平性を自動で証明しません。', en: 'Importance, PDP, and SHAP explain model behavior; they do not automatically prove real-world causes or fairness.' }
+        });
 
         // 1. Permutation Feature Importance
         html += '<h4><i class="fas fa-sort-amount-down" style="color: #16a34a;"></i> Permutation Feature Importance</h4>';

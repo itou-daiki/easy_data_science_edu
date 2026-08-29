@@ -4,11 +4,11 @@
 
 easyDataScience は、PyCaret のような機械学習ワークフローをブラウザ上で体験できる教育用アプリです。CSV / Excel の表データだけでなく、画像分類と音声分類も扱えます。通常の読み込み、前処理、学習、評価、予測はブラウザ内で行われます。
 
-生成AI支援では、APIキーがなくても分析結果ページの「AI用テキストをコピー」を使って、ChatGPT、Gemini、Claudeなどの外部生成AIへ貼り付けるための文脈をコピーできます。コピー時はネットワーク送信しませんが、内容はシステムのクリップボードへ保存されます。Gemini APIキーを入力すると、分析結果ページで「解釈を生成」したり、結果について追加質問したりできます。送信前にはパネルで実際の文脈を確認し、個人情報・機密情報を含まないことへのチェックが必要です。この操作をした場合だけ、要約統計量、データ構造、分析手法、主要指標、注意点などの分析文脈が Google Gemini API へ送信されます。先頭10件のプレビューは利用者が明示的に許可した場合だけ含まれますが、列名・クラス名・要約統計・分析結果はプレビュー設定にかかわらず送信対象です。APIキーと追加質問の履歴はJavaScriptのメモリ内にだけ保持され、再読み込みまたはページを閉じると消えます。Interactions APIへの全送信で`store=false`を指定し、API側の会話履歴保存を要求しません。生成内容は元の結果と照合してください。
+生成AI支援では、APIキーがなくても分析結果ページの「他のAI用にコピー」を使って、ChatGPT、Gemini、Claudeなどへ貼り付ける文脈をコピーできます。コピー時はネットワーク送信しませんが、内容はシステムのクリップボードへ保存されます。Gemini APIキーを入力すると、分析結果ページで「Geminiで解釈」を実行したり、結果について追加質問したりできます。AIは表示済みの結果を説明するもので、分析を再実行したり正しさを保証したりはしません。送信前にはパネルで実際の文脈を確認し、個人情報・機密情報を含まないことへのチェックが必要です。この操作をした場合だけ、要約統計量、データ構造、分析手法、主要指標、注意点などの分析文脈が Google Gemini API へ送信されます。先頭10件のプレビューは利用者が明示的に許可した場合だけ含まれますが、列名・クラス名・要約統計・分析結果はプレビュー設定にかかわらず送信対象です。APIキーと追加質問の履歴はJavaScriptのメモリ内にだけ保持され、再読み込みまたはページを閉じると消えます。Interactions APIへの全送信で`store=false`を指定し、API側の会話履歴保存を要求しません。生成内容は元の結果と照合してください。
 
 Googleは2026年9月からGemini APIのStandard keyを拒否します。[公式案内](https://ai.google.dev/gemini-api/docs/api-key)に従い、Google AI Studioで作成したAuth keyを使用してください。
 
-既定モデルは2026年8月時点の安定版`gemini-3.7-flash`です。解釈は6節の構造化JSONとして受信し、型、項目数、文字数を検証してから表示します。回答下部には実際に使われたモデルと総トークン数を表示します。指定モデルが利用できない場合だけ、Interactions APIと構造化出力に対応する安定版`gemini-3.6-flash`へ切り替わり、その事実も表示されます。
+既定モデルは2026年8月時点の安定版`gemini-3.7-flash`です。解釈は「まず一言で、結果、数値、ことば、信頼性、注意、次の一歩、レポート例」の8節からなる構造化JSONとして受信し、型、項目数、文字数を検証してから表示します。回答下部には実際に使われたモデルと総トークン数を表示します。指定モデルが利用できない場合だけ、Interactions APIと構造化出力に対応する安定版`gemini-3.6-flash`へ切り替わり、その事実も表示されます。
 
 ## 1. できること
 
@@ -76,6 +76,12 @@ http://localhost:8765
 11. 必要に応じて解釈、ブレンド、スタッキング、ファイナライズを行う。開示後の比較は探索的に扱う
 12. predict_model で新しいデータの予測を試す
 13. CSV または JSON で結果やモデルを保存する
+
+迷ったときは、次の3問に戻ります。
+
+1. 何を知りたいか。数値なら回帰、種類なら分類、まずデータを知るならEDAです。
+2. どの表示値が自分の説明の根拠か。指標、表のセル、グラフの位置を具体的に示します。
+3. まだ分からないことは何か。欠損、誤り方、評価方法、新しい独立データのうち、次に確認するものを1つ決めます。
 
 ## 4. データ準備のルール
 
@@ -549,6 +555,17 @@ AutoML の回帰・分類画面では、学習時にも自動前処理が実行�
 - `datasets/`: デモデータ
 - `js/ml/`: 機械学習・前処理・評価指標の実装
 
+## 18. 学習案内で参照した一次資料
+
+- [W3C WAI: Writing for Web Accessibility](https://www.w3.org/WAI/tips/writing/): 明確な指示、短い文章、意味の分かる見出し
+- [CAST UDL Guidelines 3.0](https://udlguidelines.cast.org/): 語彙の明確化、行動につながるフィードバック、進捗の確認
+- [NIST/SEMATECH: What is EDA?](https://itl.nist.gov/div898/handbook/eda/section1/eda11.htm): 構造、重要変数、外れ値、仮定上の問題の探索
+- [scikit-learn: Model evaluation](https://scikit-learn.org/stable/modules/model_evaluation.html) / [Common pitfalls](https://scikit-learn.org/stable/common_pitfalls.html): 目的に合う指標選択とデータリークの防止
+- [Google Gemini API: Prompt design strategies](https://ai.google.dev/gemini-api/docs/prompting-strategies) / [Safety guidance](https://ai.google.dev/gemini-api/docs/safety-guidance): 明確な指示、構造化回答、人による検証
+- [UNESCO: AI competency framework for students](https://www.unesco.org/en/articles/ai-competency-framework-students): 人間中心、年齢に応じた、批判的なAI活用
+
+確認日: 2026年8月30日
+
 ---
 
-最終更新: 2026-08-29
+最終更新: 2026-08-30

@@ -23,6 +23,7 @@ const context = {
 const input = __aiTestUtils.createInterpretationInput(context, false);
 const envelope = JSON.parse(input);
 assert.equal(envelope.task, 'interpret_analysis_results');
+assert.equal(envelope.schemaVersion, 2);
 assert.equal(envelope.analysisContext.method, context.method);
 assert.equal(envelope.analysisContext.preview, undefined);
 assert.match(envelope.analysisContext.previewPolicy, /not shared/i);
@@ -57,6 +58,10 @@ assert.equal(request.store, false);
 assert.equal(request.generation_config.thinking_level, 'medium');
 assert.equal(request.generation_config.thinking_summaries, 'none');
 assert.equal(request.response_format.mime_type, 'application/json');
+assert.match(request.system_instruction, /高校生/);
+assert.ok(request.response_format.schema.required.includes('plain_summary'));
+assert.ok(request.response_format.schema.required.includes('key_terms'));
+assert.ok(request.response_format.schema.required.includes('next_steps'));
 assert.ok(!Object.hasOwn(request.generation_config, 'temperature'));
 assert.ok(!Object.hasOwn(request.generation_config, 'top_p'));
 
@@ -95,6 +100,7 @@ const payload = {
 assert.equal(__aiTestUtils.extractInteractionText(payload), '{"answer":"ok"}');
 
 const interpretation = {
+    plain_summary: 'The model explains some variation, but its errors still need checking.',
     key_findings: [
         { statement: 'Model A performed best.', evidence: 'Test R2 was 0.82.' },
         { statement: 'Error remains.', evidence: 'Test RMSE was 12.4.' }
@@ -108,14 +114,36 @@ const interpretation = {
         { status: 'caution', point: 'Stability needs review.', evidence: 'CV variation is present.' }
     ],
     interpretation_cautions: ['Prediction is not causation.', 'External validity is unknown.'],
+    key_terms: [
+        { term: 'R2', explanation: 'The share of variation described by the model.' },
+        { term: 'RMSE', explanation: 'An error measure that emphasizes large misses.' }
+    ],
     report_examples: { short: 'Short report.', detailed: 'Detailed report.' },
-    next_checks: ['Check residuals.', 'Check leakage.', 'Validate on new data.']
+    next_steps: [
+        { action: 'Check residuals.', reason: 'Patterns can reveal missed structure.' },
+        { action: 'Check leakage.', reason: 'Leaked answers make evaluation optimistic.' },
+        { action: 'Validate on new data.', reason: 'New data tests generalization.' }
+    ]
 };
 const parsed = __aiTestUtils.parseStructuredResponse(JSON.stringify(interpretation), 'interpretation');
 const formatted = __aiTestUtils.formatInterpretationResponse(parsed);
-assert.match(formatted, /1\. 結果から言えること/);
+assert.match(formatted, /1\. まず一言で/);
 assert.match(formatted, /根拠: Test R2 was 0\.82/);
-assert.match(formatted, /6\. 次に確認すること/);
+assert.match(formatted, /4\. ことばの意味/);
+assert.match(formatted, /7\. 次の一歩/);
+assert.match(formatted, /理由: Patterns can reveal missed structure/);
+assert.match(formatted, /8\. レポート例/);
+
+const chatResponse = __aiTestUtils.parseStructuredResponse(JSON.stringify({
+    answer: 'Check Macro F1 and the confusion matrix.',
+    evidence: ['Macro F1 is shown in the result.'],
+    caveats: ['The application threshold is unknown.'],
+    next_action: 'Open the confusion matrix and identify the largest off-diagonal count.'
+}), 'chat');
+assert.match(__aiTestUtils.formatChatResponse(chatResponse), /次にすること/);
+
+assert.match(copiedPrompt, /1\. まず一言で/);
+assert.match(copiedPrompt, /7\. 次の一歩/);
 
 assert.throws(
     () => __aiTestUtils.parseStructuredResponse('{"key_findings":[]}', 'interpretation'),

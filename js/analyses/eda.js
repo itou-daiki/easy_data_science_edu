@@ -1,7 +1,7 @@
 // ==========================================
 // 探索的データ分析 (EDA) Module
 // ==========================================
-import { bindAccessibleTabs, renderPlot, createSelect, escapeHtml, formatNumber } from '../utils.js';
+import { bindAccessibleTabs, renderPlot, createSelect, createBeginnerGuide, escapeHtml, formatNumber } from '../utils.js';
 import { buildAnalysisContext, renderAIAssistPanel } from '../ai_assistant.js';
 
 export function render(container, data, characteristics) {
@@ -14,6 +14,29 @@ export function render(container, data, characteristics) {
         <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
             データの分布・相関・欠損値を可視化し、機械学習の前にデータの全体像を把握します。
         </p>
+
+        ${createBeginnerGuide({
+            purpose: {
+                ja: 'EDAは、予測を始める前に「どんなデータか」「直す点があるか」を調べる観察の段階です。',
+                en: 'EDA is the observation stage for learning what the data looks like and what may need attention before prediction.'
+            },
+            lookFor: {
+                ja: '「概要」→「分布」→「相関」→「欠損値」の順に見ます。特に欠損、極端な値、偏り、重複へ注目します。',
+                en: 'Review Overview, Distribution, Correlation, then Missing values. Focus on missing data, extreme values, skew, and duplicates.'
+            },
+            nextAction: {
+                ja: '気になる列が見つかったら前処理で対応を確認し、その後に予測したい列の型に合わせて回帰か分類へ進みます。',
+                en: 'If a column needs attention, review it under Preprocessing, then choose regression or classification based on the target type.'
+            },
+            caution: {
+                ja: 'EDAで見つけた関係は手がかりです。相関やグラフだけで原因・結果を断定できません。',
+                en: 'EDA reveals clues. Correlations and charts alone do not establish cause and effect.'
+            },
+            terms: [{
+                term: { ja: 'EDA', en: 'EDA' },
+                meaning: { ja: '探索的データ分析。モデルを作る前に、データの特徴や問題を見つける作業です。', en: 'Exploratory data analysis: examining data characteristics and possible problems before modeling.' }
+            }]
+        })}
 
         <div class="eda-tabs">
             <div class="tab-container" role="tablist" aria-label="EDA表示">
@@ -48,7 +71,17 @@ export function render(container, data, characteristics) {
 
     renderOverview(data, characteristics);
     renderMissing(data, allCols);
-    if (numCols.length >= 2) renderCorrelation(data, numCols);
+    if (numCols.length >= 2) {
+        renderCorrelation(data, numCols);
+    } else {
+        document.getElementById('correlation-plot').style.minHeight = '0';
+        document.getElementById('correlation-table').innerHTML = createBeginnerGuide({
+            title: { ja: '相関を見るには', en: 'To inspect correlation' },
+            purpose: { ja: '2つの数値列が一緒に変化する傾向を調べます。', en: 'Correlation examines whether two numeric columns tend to change together.' },
+            lookFor: { ja: '現在は数値列が2つ未満のため、相関を計算できません。', en: 'There are fewer than two numeric columns, so correlation cannot be calculated.' },
+            nextAction: { ja: '元データで数値列に文字や単位が混ざっていないか確認します。', en: 'Check whether text or units are mixed into numeric columns in the source data.' }
+        });
+    }
 
     const distSelect = container.querySelector('#dist-var-select');
     distSelect.addEventListener('change', () => {
@@ -102,6 +135,16 @@ function renderOverview(data, chars) {
     const missingRate = ((missingCount / (n * cols.length)) * 100).toFixed(1);
 
     container.innerHTML = `
+        ${createBeginnerGuide({
+            title: { ja: '概要の読み方', en: 'How to read the overview' },
+            purpose: { ja: 'データの大きさ、列の型、欠損、重複をまとめて確認します。', en: 'Review dataset size, column types, missing values, and duplicates.' },
+            lookFor: {
+                ja: `このデータは${n}行${cols.length}列で、欠損率は${missingRate}%、重複行は${countDuplicates(data)}件です。次に列ごとの型が想定どおりか見ます。`,
+                en: `This dataset has ${n} rows and ${cols.length} columns, a ${missingRate}% missing rate, and ${countDuplicates(data)} duplicate rows. Next, check each detected column type.`
+            },
+            nextAction: { ja: '数値列を「分布」で1列ずつ確認します。欠損や重複があれば、その扱いも決めます。', en: 'Inspect numeric columns one at a time under Distribution. Decide how to handle any missing or duplicate observations.' },
+            caution: { ja: '行数が多いだけでデータの質が高いとは限りません。集め方や対象の偏りも別に確認します。', en: 'More rows do not automatically mean higher-quality data. Also review how the data was collected and who or what it represents.' }
+        })}
         <div class="metrics-grid">
             <div class="metric-card">
                 <div class="metric-label">サンプル数</div>
@@ -179,6 +222,28 @@ function renderDistribution(data, colName) {
     const median = quantile(sorted, 0.5);
 
     document.getElementById('distribution-stats').innerHTML = `
+        ${createBeginnerGuide({
+            title: { ja: `${colName}の分布の読み方`, en: `How to read the distribution of ${colName}` },
+            purpose: { ja: '値がどこに集まり、どのくらい散らばっているかを確認します。', en: 'See where values cluster and how widely they spread.' },
+            lookFor: {
+                ja: `平均は${formatNumber(mean)}、中央値は${formatNumber(median)}、歪度は${skewness == null ? '計算不可' : formatNumber(skewness)}です。棒の山、空白、端に離れた値も見ます。`,
+                en: `The mean is ${formatNumber(mean)}, the median is ${formatNumber(median)}, and skewness is ${skewness == null ? 'unavailable' : formatNumber(skewness)}. Also inspect peaks, gaps, and isolated values near the ends.`
+            },
+            nextAction: Math.abs(skewness ?? 0) >= 1
+                ? {
+                    ja: '偏りが目立つため、前処理の「外れ値検出」で確認し、値の意味や入力ミスを調べます。',
+                    en: 'Because the distribution is notably skewed, inspect Outlier detection and check the meaning of extreme values or possible entry errors.'
+                }
+                : {
+                    ja: '他の数値列も選び、目的変数候補の分布と比べます。',
+                    en: 'Select other numeric columns and compare them with the distribution of your possible target.'
+                },
+            caution: { ja: '歪度が大きいこと自体は誤りではありません。所得や価格のように、本来偏るデータもあります。', en: 'A large skewness value is not automatically an error. Variables such as income or price can be naturally skewed.' },
+            terms: [{
+                term: { ja: '歪度', en: 'Skewness' },
+                meaning: { ja: '分布の左右の偏りを表す数値です。0に近いほど左右対称ですが、良し悪しの点数ではありません。', en: 'A measure of left-right asymmetry. Values near zero are more symmetric, but skewness is not a quality score.' }
+            }]
+        })}
         <div class="metrics-grid">
             <div class="metric-card"><div class="metric-label">平均</div><div class="metric-value">${formatNumber(mean)}</div></div>
             <div class="metric-card"><div class="metric-label">標準偏差</div><div class="metric-value">${formatNumber(std)}</div></div>
@@ -191,6 +256,7 @@ function renderDistribution(data, colName) {
 
 function renderCorrelation(data, numCols) {
     const matrix = [];
+    let strongest = { first: '', second: '', value: 0 };
 
     for (let i = 0; i < numCols.length; i++) {
         const row = [];
@@ -201,6 +267,9 @@ function renderCorrelation(data, numCols) {
             row.push(paired.length >= 2
                 ? pearsonCorrelation(paired.map(p => p[0]), paired.map(p => p[1]))
                 : 0);
+            if (i < j && (!strongest.first || Math.abs(row[j]) > Math.abs(strongest.value))) {
+                strongest = { first: numCols[i], second: numCols[j], value: row[j] };
+            }
         }
         matrix.push(row);
     }
@@ -227,6 +296,21 @@ function renderCorrelation(data, numCols) {
         xaxis: { tickangle: -45 },
         yaxis: { autorange: 'reversed' }
     });
+
+    document.getElementById('correlation-table').innerHTML = createBeginnerGuide({
+        title: { ja: '相関行列の読み方', en: 'How to read the correlation matrix' },
+        purpose: { ja: '2つの数値列が一緒に増減する傾向を、-1から1の値と色で比べます。', en: 'Compare how pairs of numeric columns move together using values and colors from -1 to 1.' },
+        lookFor: {
+            ja: `対角線以外で絶対値が最も大きい組は「${strongest.first}」と「${strongest.second}」で、r = ${formatNumber(strongest.value)}です。`,
+            en: `The largest absolute off-diagonal correlation is between "${strongest.first}" and "${strongest.second}", with r = ${formatNumber(strongest.value)}.`
+        },
+        nextAction: { ja: '強い組み合わせは両方の分布と欠損を確認し、予測に使う意味があるかを考えます。', en: 'For a strong pair, inspect both distributions and missing values, then consider whether the relationship is meaningful for prediction.' },
+        caution: { ja: '相関は因果関係を示しません。外れ値、別の変数、同じ内容を表す重複列でも大きくなります。', en: 'Correlation does not show causation. It can be inflated by outliers, another variable, or duplicate measures of the same concept.' },
+        terms: [{
+            term: { ja: '相関係数 r', en: 'Correlation coefficient r' },
+            meaning: { ja: '1に近いと同方向、-1に近いと反対方向、0に近いと直線的な関係が弱いことを表します。', en: 'Values near 1 indicate movement in the same direction, near -1 the opposite direction, and near 0 a weak linear relationship.' }
+        }]
+    });
 }
 
 function renderMissing(data, allCols) {
@@ -241,7 +325,13 @@ function renderMissing(data, allCols) {
     const hasMissing = missingInfo.some(m => m.missing > 0);
 
     if (!hasMissing) {
-        container.innerHTML = `<div style="text-align: center; padding: 2rem; color: #10b981;">
+        container.innerHTML = `${createBeginnerGuide({
+            title: { ja: '欠損値の読み方', en: 'How to read missing values' },
+            purpose: { ja: '記録されていないセルがどの列にどれだけあるかを確認します。', en: 'Check how many cells are unrecorded in each column.' },
+            lookFor: { ja: 'このデータでは空欄として検出された値はありません。', en: 'No blank values were detected in this dataset.' },
+            nextAction: { ja: '「分布」で極端な値や入力ミスを確認します。0や「不明」が欠損の代わりに使われていないかも確認します。', en: 'Inspect distributions for extreme values or entry errors, and check whether 0 or labels such as “unknown” were used in place of missing values.' },
+            caution: { ja: '欠損0件はデータが正しいことの証明ではありません。', en: 'Zero detected missing values does not prove that the data is correct.' }
+        })}<div style="text-align: center; padding: 2rem; color: #10b981;">
             <i class="fas fa-check-circle fa-3x" style="margin-bottom: 1rem;"></i>
             <h3>欠損値はありません</h3>
             <p>すべての変数にデータが揃っています。</p>
@@ -261,6 +351,16 @@ function renderMissing(data, allCols) {
     }];
 
     container.innerHTML = `
+        ${createBeginnerGuide({
+            title: { ja: '欠損値の読み方', en: 'How to read missing values' },
+            purpose: { ja: '欠損が多い列と、その割合を確認します。', en: 'Identify columns with missing values and compare their rates.' },
+            lookFor: {
+                ja: `最も欠損が多いのは「${missingCols[0].col}」で、${missingCols[0].missing}件（${missingCols[0].rate.toFixed(1)}%）です。`,
+                en: `The most missing values occur in "${missingCols[0].col}": ${missingCols[0].missing} rows (${missingCols[0].rate.toFixed(1)}%).`
+            },
+            nextAction: { ja: '前処理の「欠損値処理」で推奨方法を確認し、なぜ欠損したのかも元データで調べます。', en: 'Review Missing-value handling under Preprocessing and investigate why the values are missing in the source data.' },
+            caution: { ja: '空欄を埋めても、失われた情報が戻るわけではありません。欠損の理由によっては結果が偏ります。', en: 'Filling blanks does not restore lost information. Results can remain biased depending on why values are missing.' }
+        })}
         <div id="missing-plot" style="min-height: 400px;"></div>
         <div class="table-container" style="margin-top: 1rem;">
             <table class="table">

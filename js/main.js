@@ -311,11 +311,7 @@ function processData(fileName, jsonData) {
     const dataPreviewSection = document.getElementById('data-preview-section');
     dataPreviewSection.style.display = 'block';
 
-    dataPreviewSection.querySelectorAll('.collapsible-header').forEach(header => {
-        const newHeader = header.cloneNode(true);
-        header.parentNode.replaceChild(newHeader, header);
-        configureCollapsibleHeader(newHeader);
-    });
+    dataPreviewSection.querySelectorAll('.collapsible-header').forEach(configureCollapsibleHeader);
 
     updateFeatureCards();
     hideLoadingMessage();

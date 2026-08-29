@@ -2,7 +2,7 @@
 // 回帰モデル比較 (AutoML) Module
 // PyCaret-style: setup → compare_models (CV) → tune_model → predict_model
 // ==========================================
-import { createSelect, createStepIndicator, formatNumber, renderPlot, renderActualVsPredicted, renderResidualPlot, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton, makeExportFileName, renderDataPreview, renderSummaryStatistics, downloadJSON, serializeModel, makeModelFileName } from '../utils.js';
+import { createSelect, createStepIndicator, createBeginnerGuide, formatNumber, renderPlot, renderActualVsPredicted, renderResidualPlot, renderFeatureImportance, createMetricCard, renderPermutationImportance, renderPDP, renderLearningCurve, renderSHAPSummary, renderSHAPBeeswarm, renderSHAPWaterfall, toCSV, downloadCSV, createDownloadButton, makeExportFileName, renderDataPreview, renderSummaryStatistics, downloadJSON, serializeModel, makeModelFileName } from '../utils.js';
 import { buildAnalysisContext, renderAIAssistPanel } from '../ai_assistant.js';
 import { buildAnalysisQualityReport, getAnalysisQualityNotes, renderAnalysisQualityPanel } from '../analysis_quality.js';
 import { linearSHAP, kernelSHAP, shapSummary } from '../ml/shap.js';
@@ -66,6 +66,18 @@ export function render(container, data, characteristics) {
             PyCaret のように複数の回帰モデルを一括学習・比較し、最適なモデルを見つけます。
         </p>
 
+        ${createBeginnerGuide({
+            title: { ja: '回帰分析の進め方', en: 'How to proceed with regression' },
+            purpose: { ja: '面積から価格、学習時間から点数のように、数値を予測するモデルを比べます。', en: 'Compare models that predict a numeric value, such as price from floor area or score from study time.' },
+            lookFor: { ja: 'まず「予測したい数値」を目的変数にします。残りの列は予測の手がかりとなる特徴量です。', en: 'First choose the numeric value to predict as the target. The remaining columns are candidate features used as clues.' },
+            nextAction: { ja: '目的変数を選び、特徴量を確認して「モデル比較を開始」を押します。迷う場合はテスト割合30%、5-Foldのままで構いません。', en: 'Choose a target, review the features, then select Start model comparison. If unsure, keep the default 30% test split and 5 folds.' },
+            caution: { ja: '未来のデータは時系列、同じ人や学校の反復データはグループ非重複を選びます。分割方法が違うと性能評価も変わります。', en: 'Use a time split for future observations and a non-overlapping group split for repeated people or schools. Evaluation changes with the split design.' },
+            terms: [
+                { term: { ja: '目的変数', en: 'Target' }, meaning: { ja: 'モデルに予測させたい答えの列です。', en: 'The answer column the model should predict.' } },
+                { term: { ja: '特徴量', en: 'Feature' }, meaning: { ja: '予測の手がかりとしてモデルへ入力する列です。', en: 'A column supplied to the model as a clue for prediction.' } }
+            ]
+        })}
+
         ${createStepIndicator(STEPS, 0)}
 
         <div id="data-overview-section" style="margin-bottom: 1.5rem;">
@@ -125,7 +137,8 @@ export function render(container, data, characteristics) {
                 </label>
                 <div id="feature-chips" class="variable-chips"></div>
             </div>
-            <button id="btn-compare" class="btn-analysis" style="background: #d97706;" disabled>
+            <p id="reg-next-step-status" class="beginner-next-status" role="status" aria-live="polite" data-i18n-en="First, choose one target variable.">まず目的変数を1つ選んでください。</p>
+            <button id="btn-compare" class="btn-analysis" style="background: #d97706;" disabled title="目的変数を選択すると開始できます">
                 <i class="fas fa-play"></i> モデル比較を開始
             </button>
         </div>
@@ -153,12 +166,16 @@ export function render(container, data, characteristics) {
     const splitColumnLabel = container.querySelector('#split-column-label');
     const splitColumnSelect = container.querySelector('#split-column-select');
     const splitGapWrapper = container.querySelector('#split-gap-wrapper');
+    const nextStepStatus = container.querySelector('#reg-next-step-status');
 
     targetSelect.addEventListener('change', () => {
         const target = targetSelect.value;
         if (!target) {
             featureSelection.style.display = 'none';
             btnCompare.disabled = true;
+            btnCompare.title = '目的変数を選択すると開始できます';
+            nextStepStatus.dataset.i18nEn = 'First, choose one target variable.';
+            nextStepStatus.textContent = 'まず目的変数を1つ選んでください。';
             return;
         }
 
@@ -194,6 +211,9 @@ export function render(container, data, characteristics) {
 
         featureSelection.style.display = 'block';
         btnCompare.disabled = false;
+        btnCompare.removeAttribute('title');
+        nextStepStatus.dataset.i18nEn = `The target is "${target}". Review the features, then start model comparison.`;
+        nextStepStatus.textContent = `目的変数は「${target}」です。特徴量を確認したら、モデル比較を開始してください。`;
     });
 
     splitStrategySelect.addEventListener('change', () => targetSelect.dispatchEvent(new Event('change')));
@@ -431,12 +451,35 @@ function renderComparisonResults(container, results, yTest, featureNames) {
 
     const bestCV = Math.max(...results.filter(r => r.model).map(r => r.cvMean));
 
+    const successful = results.filter(result => result.model);
+    const bestModel = successful[0];
+    const secondModel = successful[1];
+    const scoreGap = bestModel && secondModel ? bestModel.cvMean - secondModel.cvMean : null;
+
     let html = `
         <h3 style="margin-top: 1rem;"><i class="fas fa-trophy" style="color: #d97706;"></i> モデル比較結果</h3>
         <p style="color: var(--text-secondary); margin-bottom: 1rem;">
             ${_state.cvFolds}-Fold ${getCvMethodLabel()}（foldごとに前処理をfit）の平均でソートしています。fold間SDはばらつきの記述であり、信頼区間ではありません。
             最終テスト ${yTest.length} 件はモデル選択が終わるまで未開封です。
         </p>
+        ${createBeginnerGuide({
+            title: { ja: '比較表の読み方', en: 'How to read the comparison table' },
+            purpose: { ja: '未使用テストを見ずに、訓練データを分け直したCVで候補モデルを比べます。', en: 'Compare candidate models with cross-validation while keeping the final test data unseen.' },
+            lookFor: {
+                ja: bestModel
+                    ? `現在の1位は${bestModel.name}で、CV R²平均は${formatNumber(bestModel.cvMean)}、fold間SDは${formatNumber(bestModel.cvStd)}です${scoreGap != null ? `。2位との差は${formatNumber(scoreGap)}です` : ''}。`
+                    : '正常に評価できたモデルがありません。エラー表示とデータ条件を確認します。',
+                en: bestModel
+                    ? `${bestModel.name} currently ranks first with mean CV R² ${formatNumber(bestModel.cvMean)} and fold SD ${formatNumber(bestModel.cvStd)}${scoreGap != null ? `. The gap from second place is ${formatNumber(scoreGap)}` : ''}.`
+                    : 'No model was evaluated successfully. Review the errors and data conditions.'
+            },
+            nextAction: { ja: '上位モデルの「詳細」を見て、CV平均・ばらつき・モデルの複雑さを比べます。候補を決めてから最終テストを1回だけ開示します。', en: 'Open Details for the leading models and compare CV mean, variability, and model complexity. Choose a candidate before revealing the final test once.' },
+            caution: { ja: '1位は今回のCVで最も高かった候補です。差が小さいときは同等と考え、単純さや安定性も重視します。', en: 'First place is only the highest candidate in this CV run. When differences are small, treat models as comparable and consider simplicity and stability.' },
+            terms: [
+                { term: { ja: 'CV R²平均', en: 'Mean CV R²' }, meaning: { ja: '訓練データを複数回に分けて測ったR²の平均です。1に近いほど高いですが、用途上十分かは別に判断します。', en: 'Average R² across training folds. Values closer to 1 are higher, but usefulness still depends on the application.' } },
+                { term: { ja: 'fold間SD', en: 'Fold SD' }, meaning: { ja: '分け方によるスコアの揺れの目安です。小さいほど安定しやすいですが、信頼区間ではありません。', en: 'A measure of score variation across splits. Smaller is generally more stable, but it is not a confidence interval.' } }
+            ]
+        })}
         <div class="table-container">
             <table class="table model-comparison-table">
                 <thead>
@@ -494,9 +537,9 @@ function renderComparisonResults(container, results, yTest, featureNames) {
     }
 
     // Auto-show best model detail
-    const bestModel = results.find(r => r.model);
-    if (bestModel) {
-        showModelDetail(container, bestModel, yTest, featureNames);
+    const selectedBestModel = results.find(r => r.model);
+    if (selectedBestModel) {
+        showModelDetail(container, selectedBestModel, yTest, featureNames);
     }
 }
 
@@ -601,6 +644,29 @@ function showModelDetail(container, result, yTest, featureNames) {
     evalContent.innerHTML = `
         <h3><i class="fas fa-chart-bar" style="color: #d97706;"></i> ${result.name} の詳細評価</h3>
 
+        ${createBeginnerGuide({
+            title: { ja: '回帰性能の読み方', en: 'How to read regression performance' },
+            purpose: { ja: 'このモデルが未知の数値をどの程度正確に予測できるかを、複数の指標で確認します。', en: 'Use several metrics to assess how accurately this model may predict unseen numeric values.' },
+            lookFor: _state.holdoutRevealed
+                ? {
+                    ja: `最終テストではR²=${formatNumber(result.r2)}、MAE=${formatNumber(result.mae)}、RMSE=${formatNumber(result.rmse)}です。まずMAEを目的変数の単位で読み、次にRMSEとの差と残差図を見ます。`,
+                    en: `On the final test, R²=${formatNumber(result.r2)}, MAE=${formatNumber(result.mae)}, and RMSE=${formatNumber(result.rmse)}. First read MAE in the target’s unit, then compare RMSE and inspect residuals.`
+                }
+                : {
+                    ja: `まだ最終テストは見ていません。CV R²=${formatNumber(result.cvMean)}とfold間SD=${formatNumber(result.cvStd)}は候補選び用です。`,
+                    en: `The final test is still unseen. CV R²=${formatNumber(result.cvMean)} and fold SD=${formatNumber(result.cvStd)} are for candidate selection.`
+                },
+            nextAction: _state.holdoutRevealed
+                ? { ja: '評価信頼性チェック、予測値対実測値、残差図を確認し、誤差が用途で許容できるかを決めます。その後にモデル解釈へ進みます。', en: 'Review the reliability panel, actual-versus-predicted plot, and residual plot. Decide whether errors are acceptable for the application, then continue to model interpretation.' }
+                : { ja: 'このモデルを最終候補にするなら「最終テストを開示」を1回だけ押します。まだ調整するなら先にCVで行います。', en: 'If this is the final candidate, reveal the final test once. If more tuning is needed, do it first using CV.' },
+            caution: { ja: 'R²が高くても全予測が正確とは限りません。MAE・RMSE、区間、残差、新しい独立データを合わせて判断します。', en: 'A high R² does not mean every prediction is accurate. Also consider MAE, RMSE, intervals, residuals, and new independent data.' },
+            terms: [
+                { term: { ja: 'MAE', en: 'MAE' }, meaning: { ja: '予測が平均でどれくらい外れたか。目的変数と同じ単位で、小さいほど誤差が小さい指標です。', en: 'The average absolute prediction error, in the target’s unit. Smaller means less error.' } },
+                { term: { ja: 'RMSE', en: 'RMSE' }, meaning: { ja: '大きな外れをMAEより重く数える誤差です。MAEとの差が大きいと、大きな失敗が一部にある可能性があります。', en: 'An error measure that penalizes large misses more than MAE. A large gap from MAE can indicate some especially large errors.' } },
+                { term: { ja: '残差', en: 'Residual' }, meaning: { ja: '実測値から予測値を引いた誤差です。規則的な形が残ると、モデルが捉えていない関係が疑われます。', en: 'The observed value minus the prediction. A pattern in residuals can indicate structure the model missed.' } }
+            ]
+        })}
+
         <div class="metrics-grid" style="margin: 1.5rem 0;">
             ${createMetricCard('CV R²', result.cvMean, `${_state.cvFolds}-Fold 前処理込みCV平均`)}
             ${createMetricCard('fold間SD', result.cvStd, 'foldスコアの標準偏差（信頼区間ではない）')}
@@ -635,7 +701,7 @@ function showModelDetail(container, result, yTest, featureNames) {
             <p style="color: #065f46; margin: 0.5rem 0;">
                 特定のアルゴリズムとパラメータを指定してモデルを作成します。
             </p>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+            <div class="create-model-config-grid">
                 <div>
                     <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">アルゴリズム:</label>
                     <select id="create-model-select" class="form-select">
@@ -971,12 +1037,12 @@ function updateCreateModelParams(container, modelIndex) {
     }
 
     paramsContainer.innerHTML = entries.map(([key, defaultVal]) => `
-        <div style="margin-bottom: 0.5rem;">
-            <label style="font-size: 0.85rem; display: inline-block; width: 120px;">${key}:</label>
+        <div class="create-param-row">
+            <label>${key}:</label>
             <input type="number" id="create-param-${key}" class="form-select"
                    value="${defaultVal !== null ? defaultVal : ''}"
                    step="any" placeholder="${defaultVal !== null ? defaultVal : 'auto'}"
-                   style="display: inline-block; width: 120px;">
+                   >
         </div>
     `).join('');
 }
@@ -1098,6 +1164,13 @@ async function runInterpretModel(container, result, featureNames) {
 
     try {
         let html = '<div style="background: white; padding: 1.5rem; border-radius: 8px; margin-top: 1rem;">';
+        html += createBeginnerGuide({
+            title: { ja: 'モデル解釈の進め方', en: 'How to interpret the model' },
+            purpose: { ja: 'モデルが何を手がかりに予測したかを、全体と1件ごとの両方から調べます。', en: 'Examine which clues the model used, both overall and for individual predictions.' },
+            lookFor: { ja: '重要度で注目列を見つけ、PDPで予測との関係、学習曲線で過学習、SHAPで各予測への寄与を確認します。', en: 'Use importance to find notable features, PDP for prediction patterns, learning curves for overfitting, and SHAP for contributions to individual predictions.' },
+            nextAction: { ja: '上位の特徴量が授業や分野の知識と矛盾しないか、ID・未来情報・答えそのものの漏れではないかを確認します。', en: 'Check whether leading features make sense in context and are not identifiers, future information, or leaked versions of the answer.' },
+            caution: { ja: '重要度・PDP・SHAPはモデルの使い方を説明するもので、現実の原因や介入効果を証明しません。', en: 'Importance, PDP, and SHAP explain model behavior; they do not prove real-world causes or intervention effects.' }
+        });
 
         // 1. Permutation Feature Importance
         html += '<h4><i class="fas fa-sort-amount-down" style="color: #16a34a;"></i> Permutation Feature Importance</h4>';
