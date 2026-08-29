@@ -580,7 +580,7 @@
                     </div>
                     <div class="manual-card">
                         <h4>Geminiで直接生成する</h4>
-                        <p>ページ上部の「生成AI支援」からGemini APIキーを入力すると、「解釈を生成」と追加質問を使ってブラウザ内で解釈補助を生成できます。</p>
+                        <p>ページ上部の「生成AI支援」からGemini APIキーを入力すると、安定版gemini-3.7-flashとInteractions APIを使って「解釈を生成」したり、追加質問したりできます。</p>
                     </div>
                 </div>
                 <div class="manual-alert manual-warning">
@@ -591,9 +591,11 @@
                     <li>送信前にパネルの「Geminiへの送信内容を確認」を開き、個人情報・機密情報がないことを確認するチェックが必要です</li>
                     <li>プレビューを無効にしても、列名・クラス名・要約統計・分析結果は送信されます</li>
                     <li>APIキー有効時は、生成した解釈や分析文脈をもとに「この結果をレポート用に短く書くと？」のような追加質問ができます</li>
-                    <li>コピー内容には、信頼性と妥当性チェック、解釈の注意点、レポート例を求める指示が含まれます</li>
-                    <li>指定したGeminiモデルが利用できない場合は、既定モデルへ自動で切り替えます</li>
+                    <li>解釈は6節の構造化JSONとして受信し、型、項目数、文字数を検証してから表示します</li>
+                    <li>回答の末尾で、実際に使われたモデル、総トークン数、互換モデルへの切替を確認できます</li>
+                    <li>指定したGeminiモデルが利用できない場合だけ、安定版gemini-3.6-flashへ自動で切り替えます</li>
                     <li>APIキーはJavaScriptのメモリ内にだけ保持され、再読み込みまたはページを閉じると消えます</li>
+                    <li>Interactions APIへの全送信で履歴保存を要求しないstore=falseを指定し、追加質問の履歴はページメモリ内だけで管理します</li>
                     <li>Googleは2026年9月からStandard keyを拒否するため、<a href="https://ai.google.dev/gemini-api/docs/api-key" target="_blank" rel="noopener noreferrer">Google AI StudioのAuth key</a>を使用してください</li>
                     <li>入力データは信頼できない文脈として区切られますが、個人情報・機密情報は送信しないでください</li>
                     <li>生成AIの説明には誤りがあり得ます。元の指標、データ、授業資料と照合してください</li>

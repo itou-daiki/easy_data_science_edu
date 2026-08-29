@@ -12,6 +12,6 @@
 
 分割方法は、独立な行の無作為分割、同一人物・学校などをまたがせないグループ分割、過去から未来を評価する時系列分割（任意のgap付き）から選べます。データの生成過程に合う方法を選んでください。
 
-通常のデータ処理と学習はブラウザ内で完結します。生成AI支援を実行した場合だけ分析文脈が Google Gemini API へ送信されます。送信前に実際の文脈を画面で確認し、個人情報・機密情報を含まないことへのチェックが必要です。先頭10件のプレビューは利用者が明示的に許可した場合だけ含まれますが、列名・クラス名・要約統計・分析結果はプレビュー設定にかかわらず送信対象です。APIキーはメモリ内にだけ保持され、再読み込みで消去されます。
+通常のデータ処理と学習はブラウザ内で完結します。生成AI支援を実行した場合だけ分析文脈が Google Gemini API へ送信されます。送信前に実際の文脈を画面で確認し、個人情報・機密情報を含まないことへのチェックが必要です。先頭10件のプレビューは利用者が明示的に許可した場合だけ含まれますが、列名・クラス名・要約統計・分析結果はプレビュー設定にかかわらず送信対象です。APIキーと追加質問の履歴はページメモリ内だけに保持し、Interactions APIには常に`store=false`を指定します。Googleの[データ保持案内](https://ai.google.dev/gemini-api/docs/zdr)も確認してください。
 
-Gemini連携には、Google AI Studioで作成したAuth keyを使用してください。Googleは[2026年9月からStandard keyを拒否する](https://ai.google.dev/gemini-api/docs/api-key)と案内しています。
+Gemini連携の既定モデルは、2026年8月時点の安定版[`gemini-3.7-flash`](https://ai.google.dev/gemini-api/docs/models/gemini-3.7-flash)です。推奨される[Interactions API](https://ai.google.dev/gemini-api/docs/migrate-to-interactions)を使用し、解釈は構造化JSONとして受信後に型検証します。Google AI Studioで作成したAuth keyを使用してください。Googleは[2026年9月からStandard keyを拒否する](https://ai.google.dev/gemini-api/docs/api-key)と案内しています。

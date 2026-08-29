@@ -103,47 +103,88 @@
     </div>
 
     <!-- Gemini AI Settings Modal -->
-    <div id="ai-settings-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="ai-settings-modal-title" aria-hidden="true">
+    <div id="ai-settings-modal" class="modal ai-settings-modal" role="dialog" aria-modal="true"
+         aria-labelledby="ai-settings-modal-title" aria-describedby="ai-settings-modal-description" aria-hidden="true">
         <div class="modal-content ai-settings-modal-content">
-            <div class="modal-header">
-                <h3 id="ai-settings-modal-title"><i class="fas fa-magic"></i> 生成AI支援の設定</h3>
-                <button type="button" class="close-modal" id="close-ai-settings-modal" aria-label="閉じる">&times;</button>
-            </div>
-            <p class="ai-settings-description">
-                分析結果ページでは、APIキーがなくても他の生成AIに貼り付けるためのAI用テキストをコピーできます。
-                Gemini APIキーを入力すると、ブラウザ内の補助パネルから直接「解釈を生成」し、結果について追加質問できます。
-                APIキーはこのページのメモリ内にだけ保持され、再読み込みすると消えます。「解釈を生成」または追加質問を押した場合のみ、
-                要約統計量・データ構造・分析手法・主要指標・注意点が Google Gemini API へ送信されます。
-                ブラウザアプリではキーを完全に秘匿できないため、利用制限を設定した専用キーを使用してください。
-            </p>
-            <form class="ai-settings-form" onsubmit="return false;">
-                <label for="gemini-api-key-input">Gemini APIキー</label>
-                <input type="password" id="gemini-api-key-input" placeholder="Google AI StudioのAuth key" autocomplete="off">
-                <p class="input-hint">
-                    Googleは2026年9月からStandard keyを拒否します。Google AI Studioで作成したAuth keyを使用してください。
-                    <a href="https://ai.google.dev/gemini-api/docs/api-key" target="_blank" rel="noopener noreferrer">公式のキー移行案内</a>
-                </p>
-
-                <label for="gemini-model-input">使用モデル</label>
-                <input type="text" id="gemini-model-input" value="gemini-2.5-flash" autocomplete="off">
-                <p class="input-hint">指定モデルが利用できない場合は gemini-2.5-flash へ自動で切り替えます。</p>
-
-                <label class="ai-preview-option" for="gemini-include-preview-input">
-                    <input type="checkbox" id="gemini-include-preview-input">
-                    データ先頭10件の値も送信する
-                </label>
-                <p class="input-hint">既定では送信しません。個人情報や機密情報がないことを確認した場合だけ有効にしてください。</p>
-
-                <div class="ai-settings-actions">
-                    <button type="button" id="save-ai-settings-btn" class="btn-analysis">
-                        <i class="fas fa-check"></i> 有効化
-                    </button>
-                    <button type="button" id="clear-ai-settings-btn" class="btn-demo">
-                        <i class="fas fa-ban"></i> 無効化
-                    </button>
+            <div class="modal-header ai-settings-modal-header">
+                <div class="ai-settings-heading">
+                    <span class="ai-settings-heading-icon" aria-hidden="true"><i class="fas fa-magic"></i></span>
+                    <div>
+                        <span class="ai-settings-kicker">Gemini API 接続</span>
+                        <h3 id="ai-settings-modal-title">生成AI支援の設定</h3>
+                    </div>
                 </div>
-                <div id="ai-settings-status" class="ai-settings-status" role="status" aria-live="polite"></div>
-            </form>
+                <button type="button" class="close-modal" id="close-ai-settings-modal"
+                        aria-label="閉じる" title="閉じる"><i class="fas fa-times" aria-hidden="true"></i></button>
+            </div>
+
+            <div class="ai-settings-scroll">
+                <div id="ai-settings-modal-description" class="ai-settings-description">
+                    <p class="ai-settings-lead">
+                        分析結果の解釈をGeminiに依頼するための接続設定です。APIキーなしでも、分析結果ページの「AI用テキストをコピー」は使えます。
+                    </p>
+                    <ul class="ai-settings-summary">
+                        <li><i class="fas fa-key" aria-hidden="true"></i><span>APIキーはページのメモリ内だけに保持され、再読み込みすると消えます。</span></li>
+                        <li><i class="fas fa-paper-plane" aria-hidden="true"></i><span>送信は「解釈を生成」または追加質問を押したときだけです。</span></li>
+                        <li><i class="fas fa-database" aria-hidden="true"></i><span>履歴保存を要求せず（store=false）、先頭10件の値は既定では送りません。</span></li>
+                    </ul>
+                    <p class="ai-settings-warning">
+                        <i class="fas fa-shield-alt" aria-hidden="true"></i>
+                        <span>ブラウザではキーを完全に秘匿できません。利用制限を設定した専用キーを使用してください。</span>
+                    </p>
+                </div>
+
+                <form class="ai-settings-form" onsubmit="return false;">
+                    <section class="ai-settings-section" aria-labelledby="ai-settings-connection-title">
+                        <div class="ai-settings-section-heading">
+                            <h4 id="ai-settings-connection-title">接続情報</h4>
+                            <span class="ai-settings-required">必須</span>
+                        </div>
+                        <div class="ai-settings-field-grid">
+                            <div class="ai-settings-field ai-settings-key-field">
+                                <label for="gemini-api-key-input">Gemini APIキー</label>
+                                <input type="password" id="gemini-api-key-input" placeholder="Google AI StudioのAuth key"
+                                       autocomplete="new-password" autocapitalize="off" spellcheck="false"
+                                       aria-describedby="gemini-api-key-hint">
+                                <p class="input-hint" id="gemini-api-key-hint">
+                                    Googleは2026年9月からStandard keyを拒否します。Google AI Studioで作成したAuth keyを使用してください。
+                                    <a href="https://ai.google.dev/gemini-api/docs/api-key" target="_blank" rel="noopener noreferrer">公式のキー移行案内</a>
+                                </p>
+                            </div>
+
+                            <div class="ai-settings-field">
+                                <label for="gemini-model-input">使用モデル</label>
+                                <input type="text" id="gemini-model-input" value="gemini-3.7-flash"
+                                       autocomplete="off" autocapitalize="off" spellcheck="false"
+                                       aria-describedby="gemini-model-hint">
+                                <p class="input-hint" id="gemini-model-hint">既定は安定版 gemini-3.7-flash です。指定モデルが利用できない場合は安定版 gemini-3.6-flash へ自動で切り替えます。</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <fieldset class="ai-settings-section ai-settings-preview-section">
+                        <legend>送信するデータ</legend>
+                        <label class="ai-preview-option" for="gemini-include-preview-input">
+                            <input type="checkbox" id="gemini-include-preview-input" aria-describedby="gemini-preview-hint">
+                            <span class="ai-preview-copy">
+                                <strong>データ先頭10件の値も送信する</strong>
+                                <span id="gemini-preview-hint">既定では送信しません。個人情報や機密情報がないことを確認した場合だけ有効にしてください。</span>
+                            </span>
+                        </label>
+                    </fieldset>
+
+                    <div id="ai-settings-status" class="ai-settings-status" role="status" aria-live="polite" aria-atomic="true"></div>
+
+                    <div class="ai-settings-actions">
+                        <button type="button" id="save-ai-settings-btn" class="btn-analysis">
+                            <i class="fas fa-check"></i> 有効化
+                        </button>
+                        <button type="button" id="clear-ai-settings-btn" class="btn-demo">
+                            <i class="fas fa-ban"></i> 無効化
+                        </button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
 
