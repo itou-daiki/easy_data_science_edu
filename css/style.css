@@ -50,7 +50,7 @@ body {
 
 /* === Hero Section === */
 .hero-section {
-    background: var(--primary-color); border-radius: 24px; padding: 3rem 2rem;
+    background: var(--primary-color); border-radius: 24px; padding: 5.75rem 2rem 3rem;
     text-align: center; color: white; margin-bottom: 2rem;
     box-shadow: var(--shadow-xl); position: relative; overflow: hidden;
 }
@@ -464,6 +464,10 @@ table tr:hover { background: var(--background); }
 .hero-action-left {
     position: absolute; top: 1.5rem; left: 1.5rem; z-index: 10;
 }
+.hero-action-right {
+    position: absolute; top: 1.5rem; right: 1.5rem; z-index: 10;
+    display: flex; align-items: center; justify-content: flex-end; gap: 0.65rem;
+}
 .ai-settings-button {
     display: inline-flex; align-items: center; gap: 0.5rem;
     background: rgba(255, 255, 255, 0.2); color: white;
@@ -471,6 +475,50 @@ table tr:hover { background: var(--background); }
 }
 .ai-settings-button:hover {
     background: rgba(255, 255, 255, 0.28); color: white;
+}
+.manual-link-button {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+    margin: 0; padding: 0.5rem 1rem; text-decoration: none;
+    background: rgba(255, 255, 255, 0.2); color: white;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+}
+.manual-link-button:hover {
+    background: rgba(255, 255, 255, 0.28); color: white;
+}
+.language-switch {
+    display: inline-flex; align-items: center; gap: 0.2rem;
+    min-height: 36px; padding: 0.2rem 0.25rem 0.2rem 0.55rem;
+    border: 1px solid var(--border-color); border-radius: 8px;
+    background: var(--surface); color: var(--text-secondary);
+}
+.language-switch > i {
+    margin-right: 0.15rem; font-size: 0.85rem;
+}
+.language-option {
+    min-width: 42px; min-height: 28px; margin: 0; padding: 0.25rem 0.55rem;
+    border: 0; border-radius: 5px; background: transparent; color: inherit;
+    font: inherit; font-size: 0.78rem; font-weight: 700; line-height: 1;
+    cursor: pointer;
+}
+.language-option:hover {
+    background: rgba(30, 144, 255, 0.1);
+}
+.language-option.active {
+    background: var(--primary-color); color: white;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
+}
+.language-option:focus-visible {
+    outline: 3px solid rgba(59, 130, 246, 0.45); outline-offset: 2px;
+}
+.language-switch-on-dark {
+    background: rgba(255, 255, 255, 0.16); color: white;
+    border-color: rgba(255, 255, 255, 0.4);
+}
+.language-switch-on-dark .language-option:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+.language-switch-on-dark .language-option.active {
+    background: white; color: #1d4ed8;
 }
 .ai-status-badge {
     display: inline-flex; align-items: center; justify-content: center;
@@ -965,8 +1013,18 @@ table tr:hover { background: var(--background); }
     .hero-action-left {
         position: static; margin: 0 auto 1rem auto; width: 100%;
     }
+    .hero-action-right {
+        position: static; width: 100%; margin: 0 auto 1.25rem;
+        justify-content: center; flex-wrap: wrap;
+    }
     .ai-settings-button {
         width: 100%; justify-content: center;
+    }
+    .hero-action-right .manual-link-button {
+        width: auto; min-height: 42px; margin: 0;
+    }
+    .language-option {
+        min-height: 30px; margin: 0; padding: 0.25rem 0.55rem; font-size: 0.78rem;
     }
     .ai-assist-floating {
         right: 0.75rem; bottom: 0.75rem; width: calc(100vw - 1.5rem);

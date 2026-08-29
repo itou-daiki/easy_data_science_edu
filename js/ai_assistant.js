@@ -1,6 +1,7 @@
 // ==========================================
 // Gemini AI Interpretation Assistant
 // ==========================================
+import { getLanguage, LANGUAGE_CHANGE_EVENT, tr } from './i18n.js';
 
 const SETTINGS_KEY = 'easyDataScience.geminiSettings.v1';
 const DEFAULT_MODEL = 'gemini-2.5-flash';
@@ -58,13 +59,19 @@ export function setupAIAssistSettingsUI(elements) {
         const settings = getAISettings();
         const active = settings.apiKey.trim().length > 0;
         if (badge) {
-            badge.textContent = active ? '有効' : '未設定';
+            badge.textContent = tr(active ? '有効' : '未設定');
             badge.classList.toggle('active', active);
         }
         if (status) {
             status.textContent = message || (active
-                ? '生成AI支援は有効です。「解釈を生成」や追加質問を押すと、分析文脈の要約がGoogle Gemini APIへ送信されます。AI用テキストのコピーも利用できます。'
-                : 'APIキー未設定でも、分析結果ページでAI用テキストをコピーできます。Geminiで解釈生成や追加質問を使う場合だけAPIキーを入力してください。');
+                ? aiText(
+                    '生成AI支援は有効です。「解釈を生成」や追加質問を押すと、分析文脈の要約がGoogle Gemini APIへ送信されます。AI用テキストのコピーも利用できます。',
+                    'Generative AI support is enabled. When you generate an interpretation or ask a follow-up, a summarized analysis context is sent to the Google Gemini API. Copying text for another AI is also available.'
+                )
+                : aiText(
+                    'APIキー未設定でも、分析結果ページでAI用テキストをコピーできます。Geminiで解釈生成や追加質問を使う場合だけAPIキーを入力してください。',
+                    'You can copy text for another AI without an API key. Enter a key only when you want Gemini to generate an interpretation or answer follow-up questions.'
+                ));
             status.classList.toggle('active', active);
         }
         modelInput.value = settings.model || DEFAULT_MODEL;
@@ -92,18 +99,24 @@ export function setupAIAssistSettingsUI(elements) {
         const model = (modelInput.value.trim() || DEFAULT_MODEL).replace(/^models\//, '');
 
         if (!apiKey) {
-            updateStatus('APIキーを入力してください。');
+            updateStatus(aiText('APIキーを入力してください。', 'Enter an API key.'));
             return;
         }
 
         sessionStorage.setItem(SETTINGS_KEY, JSON.stringify({ apiKey, model }));
-        updateStatus('生成AI支援を有効化しました。分析結果ページで解釈生成、追加質問、AI用テキストコピーを利用できます。');
+        updateStatus(aiText(
+            '生成AI支援を有効化しました。分析結果ページで解釈生成、追加質問、AI用テキストコピーを利用できます。',
+            'Generative AI support is enabled. You can generate interpretations, ask follow-up questions, and copy text for another AI on result pages.'
+        ));
         window.dispatchEvent(new CustomEvent('ai-assist-settings-changed'));
     });
 
     clearButton.addEventListener('click', () => {
         clearAISettings();
-        updateStatus('Gemini APIキーを削除しました。解釈生成と追加質問は無効ですが、AI用テキストのコピーは利用できます。');
+        updateStatus(aiText(
+            'Gemini APIキーを削除しました。解釈生成と追加質問は無効ですが、AI用テキストのコピーは利用できます。',
+            'The Gemini API key was removed. Interpretation and follow-up questions are disabled, but copying text for another AI remains available.'
+        ));
     });
 
     window.addEventListener('ai-assist-settings-changed', () => {
@@ -113,6 +126,11 @@ export function setupAIAssistSettingsUI(elements) {
         } else {
             removeAIAssistPanel();
         }
+    });
+
+    window.addEventListener(LANGUAGE_CHANGE_EVENT, () => {
+        updateStatus();
+        if (lastPanelRequest) renderAIAssistPanel(lastPanelRequest);
     });
 
     updateStatus();
@@ -151,60 +169,70 @@ export function renderAIAssistPanel({
     const generateDisabled = !ready || !hasApiKey;
     const chatDisabled = !ready || !hasApiKey;
     const copyTitle = ready
-        ? '分析結果を他の生成AIへ貼り付けるためのテキストとしてコピーします'
-        : unavailableReason;
+        ? aiText(
+            '分析結果を他の生成AIへ貼り付けるためのテキストとしてコピーします',
+            'Copy the analysis context for use with another generative AI'
+        )
+        : tr(unavailableReason);
     const generateTitle = !ready
-        ? unavailableReason
-        : (hasApiKey ? 'Geminiで解釈を生成' : 'Geminiで解釈を生成するにはAPIキーを設定してください');
+        ? tr(unavailableReason)
+        : (hasApiKey
+            ? aiText('Geminiで解釈を生成', 'Generate an interpretation with Gemini')
+            : aiText('Geminiで解釈を生成するにはAPIキーを設定してください', 'Set an API key to generate an interpretation with Gemini'));
     const chatTitle = !ready
-        ? unavailableReason
-        : (hasApiKey ? '分析結果についてGeminiに追加質問します' : '追加質問にはGemini APIキーが必要です');
+        ? tr(unavailableReason)
+        : (hasApiKey
+            ? aiText('分析結果についてGeminiに追加質問します', 'Ask Gemini a follow-up question about the results')
+            : aiText('追加質問にはGemini APIキーが必要です', 'A Gemini API key is required for follow-up questions'));
     const outputMessage = createInitialOutputMessage({ ready, hasApiKey, unavailableReason });
 
     const panel = document.createElement('aside');
     panel.id = 'ai-assist-floating-panel';
     panel.className = 'ai-assist-floating';
-    panel.setAttribute('aria-label', '生成AIによる解釈補助');
+    panel.setAttribute('aria-label', aiText('生成AIによる解釈補助', 'AI interpretation support'));
 
     panel.innerHTML = `
         <div class="ai-assist-header">
             <div>
-                <div class="ai-assist-title"><i class="fas fa-magic"></i> ${escapeHtml(title)}</div>
-                <div class="ai-assist-subtitle">${escapeHtml(context.method || '分析結果')}</div>
+                <div class="ai-assist-title"><i class="fas fa-magic"></i> ${escapeHtml(tr(title))}</div>
+                <div class="ai-assist-subtitle">${escapeHtml(tr(context.method || '分析結果'))}</div>
             </div>
             <div class="ai-assist-icon-actions">
-                <button type="button" class="ai-assist-icon-button" data-action="collapse" title="折りたたむ">
+                <button type="button" class="ai-assist-icon-button" data-action="collapse" title="${escapeHtml(tr('折りたたむ'))}">
                     <i class="fas fa-minus"></i>
                 </button>
-                <button type="button" class="ai-assist-icon-button" data-action="close" title="閉じる">
+                <button type="button" class="ai-assist-icon-button" data-action="close" title="${escapeHtml(tr('閉じる'))}">
                     <i class="fas fa-xmark"></i>
                 </button>
             </div>
         </div>
         <div class="ai-assist-body">
             <div class="ai-assist-context">
-                <strong>読み取り対象</strong>
+                <strong>${escapeHtml(tr('読み取り対象'))}</strong>
                 <span>${escapeHtml(createContextLine(context))}</span>
             </div>
             <div class="ai-assist-privacy-note">
                 <i class="fas fa-lock"></i>
-                <span>コピーはブラウザ内で完結します。「解釈を生成」または追加質問を押した場合だけ、要約文脈が Google Gemini API へ送信されます。アップロードファイル全体は送信しません。</span>
+                <span>${escapeHtml(aiText(
+                    'コピーはブラウザ内で完結します。「解釈を生成」または追加質問を押した場合だけ、要約文脈が Google Gemini API へ送信されます。アップロードファイル全体は送信しません。',
+                    'Copying stays in your browser. A summarized context is sent to the Google Gemini API only when you generate an interpretation or ask a follow-up. The entire uploaded file is never sent.'
+                ))}</span>
             </div>
             <div class="ai-assist-actions">
                 <button type="button" class="ai-assist-copy" ${copyDisabled ? 'disabled' : ''} title="${escapeHtml(copyTitle)}">
-                    <i class="fas fa-copy"></i> AI用テキストをコピー
+                    <i class="fas fa-copy"></i> ${escapeHtml(tr('AI用テキストをコピー'))}
                 </button>
                 <button type="button" class="ai-assist-generate" ${generateDisabled ? 'disabled' : ''} title="${escapeHtml(generateTitle)}">
-                    <i class="fas fa-lightbulb"></i> 解釈を生成
+                    <i class="fas fa-lightbulb"></i> ${escapeHtml(tr('解釈を生成'))}
                 </button>
             </div>
             <div class="ai-assist-output" aria-live="polite">
                 ${escapeHtml(outputMessage)}
             </div>
             <div class="ai-assist-chat-area">
-                <textarea class="ai-assist-chat-input" rows="2" placeholder="例: この結果をレポート用に短く書くと？" title="${escapeHtml(chatTitle)}" ${chatDisabled ? 'disabled' : ''}></textarea>
+                <textarea class="ai-assist-chat-input" rows="2" placeholder="${escapeHtml(tr('例: この結果をレポート用に短く書くと？'))}" title="${escapeHtml(chatTitle)}" ${chatDisabled ? 'disabled' : ''}></textarea>
                 <button type="button" class="ai-assist-chat-send" title="${escapeHtml(chatTitle)}" ${chatDisabled ? 'disabled' : ''}>
-                    <i class="fas fa-paper-plane"></i> 質問
+                    <i class="fas fa-paper-plane"></i> ${escapeHtml(tr('質問'))}
                 </button>
             </div>
         </div>
@@ -236,10 +264,16 @@ export function renderAIAssistPanel({
         copyButton.disabled = true;
         try {
             await copyTextToClipboard(buildPrompt(context));
-            copyButton.innerHTML = '<i class="fas fa-check"></i> コピーしました';
-            output.textContent = 'AI用テキストをクリップボードにコピーしました。外部AIに貼り付けて利用できます。';
+            copyButton.innerHTML = `<i class="fas fa-check"></i> ${escapeHtml(tr('コピーしました'))}`;
+            output.textContent = aiText(
+                'AI用テキストをクリップボードにコピーしました。外部AIに貼り付けて利用できます。',
+                'The analysis text was copied to the clipboard. Paste it into another AI service to use it.'
+            );
         } catch {
-            output.textContent = 'クリップボードへのコピーに失敗しました。ブラウザの権限設定を確認してください。';
+            output.textContent = aiText(
+                'クリップボードへのコピーに失敗しました。ブラウザの権限設定を確認してください。',
+                'Could not copy to the clipboard. Check the browser permission settings.'
+            );
         } finally {
             setTimeout(() => {
                 copyButton.innerHTML = originalHtml;
@@ -253,7 +287,7 @@ export function renderAIAssistPanel({
 
         generateButton.disabled = true;
         generateButton.classList.add('is-loading');
-        output.textContent = 'Gemini に解釈を依頼しています...';
+        output.textContent = aiText('Gemini に解釈を依頼しています...', 'Asking Gemini to interpret the results...');
 
         try {
             const responseText = await requestGeminiInterpretation(context);
@@ -281,15 +315,15 @@ export function renderAIAssistPanel({
         generateButton.disabled = true;
 
         const previousOutput = output.textContent.trim();
-        output.textContent = `${previousOutput}\n\n質問: ${question}\n\n回答を生成しています...`;
+        output.textContent = `${previousOutput}\n\n${aiText('質問', 'Question')}: ${question}\n\n${aiText('回答を生成しています...', 'Generating an answer...')}`;
 
         try {
             const answer = await requestGeminiChat(context, question);
             chatHistory.push({ role: 'user', text: question }, { role: 'assistant', text: answer });
             chatHistory = chatHistory.slice(-10);
-            output.textContent = `${previousOutput}\n\n質問: ${question}\n\n${answer}`;
+            output.textContent = `${previousOutput}\n\n${aiText('質問', 'Question')}: ${question}\n\n${answer}`;
         } catch (error) {
-            output.textContent = `${previousOutput}\n\n質問: ${question}\n\n回答に失敗しました。\n${error.message}`;
+            output.textContent = `${previousOutput}\n\n${aiText('質問', 'Question')}: ${question}\n\n${aiText('回答に失敗しました。', 'Could not generate an answer.')}\n${error.message}`;
         } finally {
             const disabled = !ready || !isAIAssistActive();
             chatInput.disabled = disabled;
@@ -318,11 +352,17 @@ export function clearAIAssistPanelContext() {
 }
 
 function createInitialOutputMessage({ ready, hasApiKey, unavailableReason }) {
-    if (!ready) return unavailableReason;
+    if (!ready) return tr(unavailableReason);
     if (!hasApiKey) {
-        return 'AI用テキストをコピーして、ChatGPT、Gemini、Claudeなどに貼り付けて使えます。Geminiで直接生成や追加質問を使う場合は、ページ上部の「生成AI支援」からAPIキーを設定してください。';
+        return aiText(
+            'AI用テキストをコピーして、ChatGPT、Gemini、Claudeなどに貼り付けて使えます。Geminiで直接生成や追加質問を使う場合は、ページ上部の「生成AI支援」からAPIキーを設定してください。',
+            'Copy the analysis text and paste it into ChatGPT, Gemini, Claude, or another AI. To generate directly with Gemini or ask follow-up questions, set an API key under “Generative AI support” at the top of the page.'
+        );
     }
-    return '分析結果の表や指標を踏まえて、解釈生成・追加質問・AI用テキストコピーを利用できます。';
+    return aiText(
+        '分析結果の表や指標を踏まえて、解釈生成・追加質問・AI用テキストコピーを利用できます。',
+        'Use the result tables and metrics to generate an interpretation, ask follow-up questions, or copy text for another AI.'
+    );
 }
 
 function createContextFingerprint(context) {
@@ -367,7 +407,10 @@ async function requestGeminiChat(context, question) {
 async function requestGemini(prompt, maxOutputTokens) {
     const settings = getAISettings();
     if (!settings.apiKey.trim()) {
-        throw new Error('Gemini APIキーが未設定です。ページ上部の「生成AI支援」からキーを入力してください。');
+        throw new Error(aiText(
+            'Gemini APIキーが未設定です。ページ上部の「生成AI支援」からキーを入力してください。',
+            'No Gemini API key is configured. Enter a key under “Generative AI support” at the top of the page.'
+        ));
     }
 
     const errors = [];
@@ -384,7 +427,10 @@ async function requestGemini(prompt, maxOutputTokens) {
                 body: JSON.stringify({
                     system_instruction: {
                         parts: [{
-                            text: 'あなたはデータサイエンス教育のチューターです。提供された分析結果だけを根拠に、日本語で初学者にもわかるように説明してください。性能指標だけでなく、データ量、前処理、過学習、評価設計、限界も扱い、因果関係は断定しないでください。'
+                            text: aiText(
+                                'あなたはデータサイエンス教育のチューターです。提供された分析結果だけを根拠に、日本語で初学者にもわかるように説明してください。性能指標だけでなく、データ量、前処理、過学習、評価設計、限界も扱い、因果関係は断定しないでください。',
+                                'You are a data science tutor. Explain the supplied analysis in clear English for a beginner, using only the provided results. Address sample size, preprocessing, overfitting, evaluation design, and limitations as well as performance metrics. Do not claim causation.'
+                            )
                         }]
                     },
                     contents: [{
@@ -399,7 +445,10 @@ async function requestGemini(prompt, maxOutputTokens) {
                 })
             });
         } catch {
-            throw new Error('Gemini APIに接続できませんでした。ネットワーク接続またはブラウザの通信制限を確認してください。');
+            throw new Error(aiText(
+                'Gemini APIに接続できませんでした。ネットワーク接続またはブラウザの通信制限を確認してください。',
+                'Could not connect to the Gemini API. Check the network connection and browser communication restrictions.'
+            ));
         }
 
         const responseText = await response.text();
@@ -415,7 +464,11 @@ async function requestGemini(prompt, maxOutputTokens) {
 
         const text = extractGeminiText(payload);
         if (!text) {
-            errors.push({ model, status: response.status, message: 'Geminiから解釈文を取得できませんでした。' });
+            errors.push({
+                model,
+                status: response.status,
+                message: aiText('Geminiから解釈文を取得できませんでした。', 'Gemini returned no interpretation text.')
+            });
             continue;
         }
         return text;
@@ -442,12 +495,21 @@ function createGeminiRequestError(errors) {
         .join('\n');
 
     if (latest?.status === 401 || latest?.status === 403) {
-        return new Error(`Gemini APIキーが無効、または権限がありません。APIキーと利用設定を確認してください。\n${detail}`);
+        return new Error(`${aiText(
+            'Gemini APIキーが無効、または権限がありません。APIキーと利用設定を確認してください。',
+            'The Gemini API key is invalid or lacks permission. Check the key and API settings.'
+        )}\n${detail}`);
     }
     if (latest?.status === 400 || latest?.status === 404) {
-        return new Error(`Geminiモデル名またはリクエスト内容を確認してください。\n${detail}`);
+        return new Error(`${aiText(
+            'Geminiモデル名またはリクエスト内容を確認してください。',
+            'Check the Gemini model name and request settings.'
+        )}\n${detail}`);
     }
-    return new Error(`Gemini APIの呼び出しに失敗しました。\n${detail}`);
+    return new Error(`${aiText(
+        'Gemini APIの呼び出しに失敗しました。',
+        'The Gemini API request failed.'
+    )}\n${detail}`);
 }
 
 function parseJsonSafely(text) {
@@ -468,6 +530,47 @@ function extractGeminiText(payload) {
 
 function buildPrompt(context) {
     const compactContext = JSON.stringify(context, null, 2);
+    if (getLanguage() === 'en') {
+        return `You are tutoring a beginner who is learning data analysis.
+Use only the information shown in the analysis context below to explain the results.
+
+Use exactly these six section headings:
+1. What the results show
+2. Numbers to notice
+3. Reliability and validity check
+4. Interpretation cautions
+5. Report examples
+6. What to check next
+
+Length and structure:
+- Aim for roughly 700-1,000 words; do not stop at a superficial summary
+- Include 2-4 bullet points in each of sections 1-4
+- In “Report examples,” provide both a short report paragraph and a slightly more detailed version
+- In “What to check next,” give three concrete actions the user can take
+
+Constraints:
+- Start with specific variables, models, statistics, metrics, or cautions from the supplied results
+- Do not begin with a generic explanation of the analysis method
+- Prioritize the most important finding visible in the results and include numerical evidence
+- In the reliability and validity section, address applicable issues such as sample size, missing values, outliers, overfitting, data leakage, the difference between CV and test evaluation, class imbalance, and feature count
+- Do not invent values or conclusions that are not supplied
+- Clearly say when additional verification is required
+- If the context does not contain usable statistics, say that the result table could not be read sufficiently instead of filling the gap with general advice
+- Even when performance looks strong, discuss the independent test, CV variability, data volume, and nature of the target cautiously
+- Do not infer causation from correlation or regression alone
+- Use natural, beginner-friendly English while preserving enough detail to explain evidence, meaning, and limitations
+- Do not use Markdown level-two or larger headings
+
+Poor opening example:
+“This analysis compares the performance of machine learning models.”
+
+Better opening example:
+“The random forest achieved a test R² of 0.82 and an RMSE of 12.4, the lowest error among the compared models, but the wide variation in CV R² means its stability needs further checking.”
+
+Analysis context:
+${compactContext}`;
+    }
+
     return `あなたは日本語でデータ分析を学ぶ初学者を支援するチューターです。
 以下の分析画面に表示されている情報だけを根拠に、ユーザーが結果を理解できるように説明してください。
 
@@ -512,8 +615,31 @@ function buildChatPrompt(context, question) {
     const compactContext = JSON.stringify(context, null, 2);
     const history = chatHistory
         .slice(-8)
-        .map(item => `${item.role === 'user' ? 'ユーザー' : 'AI'}: ${item.text}`)
+        .map(item => `${item.role === 'user' ? aiText('ユーザー', 'User') : 'AI'}: ${item.text}`)
         .join('\n\n');
+
+    if (getLanguage() === 'en') {
+        return `You are tutoring a beginner who is learning data analysis.
+Answer the follow-up question using only the analysis context and conversation below.
+
+Rules:
+- Answer the question directly first
+- Prefer specific variables, models, metrics, statistics, cautions, and numerical evidence shown in the context
+- When relevant, check reliability and validity issues such as sample size, missing values, outliers, overfitting, data leakage, CV versus test evaluation, class imbalance, and feature count
+- Do not guess information that is absent; say “This cannot be determined from the results shown here”
+- Do not infer causation from correlation or regression alone
+- Keep the answer focused and use bullets when helpful
+- Do not use Markdown level-two or larger headings
+
+Analysis context:
+${compactContext}
+
+Conversation so far:
+${history || 'There is no previous conversation.'}
+
+Follow-up question:
+${question}`;
+    }
 
     return `あなたは日本語でデータ分析を学ぶ初学者を支援するチューターです。
 以下の分析画面に表示されている情報と、これまでの会話だけを根拠に、ユーザーの追加質問へ答えてください。
@@ -607,7 +733,14 @@ function createContextLine(context) {
     const rows = context.dataStructure?.rowCount ?? 0;
     const cols = context.dataStructure?.columnCount ?? 0;
     const resultKeys = Object.keys(context.resultSummary || {}).length;
+    if (getLanguage() === 'en') {
+        return `${context.preview?.length || 0} preview rows, ${context.summaryStatistics?.length || 0} summary columns, ${rows} rows x ${cols} columns, ${resultKeys} result items`;
+    }
     return `先頭${context.preview?.length || 0}件、要約統計量${context.summaryStatistics?.length || 0}列、${rows}行${cols}列、結果項目${resultKeys}件`;
+}
+
+function aiText(japanese, english) {
+    return getLanguage() === 'en' ? english : japanese;
 }
 
 function truncateValue(value) {

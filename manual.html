@@ -49,6 +49,11 @@
             font-weight: 600;
         }
 
+        .manual-top-nav .language-switch {
+            margin-left: auto;
+            flex-shrink: 0;
+        }
+
         .manual-title {
             margin-left: 1.5rem;
             padding-left: 1.5rem;
@@ -276,13 +281,30 @@
             }
 
             .manual-top-nav {
-                padding: 0 1rem;
+                gap: 0.5rem;
+                padding: 0 0.75rem;
             }
 
             .manual-title {
-                margin-left: 1rem;
-                padding-left: 1rem;
-                font-size: 0.95rem;
+                display: none;
+            }
+
+            .manual-top-nav > a {
+                width: 2.25rem;
+                height: 2.25rem;
+                flex: 0 0 2.25rem;
+                justify-content: center;
+            }
+
+            .manual-back-label {
+                display: none;
+            }
+
+            .manual-top-nav .language-option {
+                min-height: 30px;
+                margin: 0;
+                padding: 0.25rem 0.55rem;
+                font-size: 0.78rem;
             }
 
             .manual-hero,
@@ -295,8 +317,18 @@
 
 <body>
     <header class="manual-top-nav">
-        <a href="index.html"><i class="fas fa-arrow-left"></i> アプリへ戻る</a>
+        <a href="index.html" aria-label="アプリへ戻る" title="アプリへ戻る">
+            <i class="fas fa-arrow-left" aria-hidden="true"></i><span class="manual-back-label">アプリへ戻る</span>
+        </a>
         <div class="manual-title"><i class="fas fa-book-open"></i> easyDataScience 使い方マニュアル</div>
+        <div class="language-switch language-switch-on-dark" role="group"
+            data-language-switch data-i18n-ignore aria-label="表示言語">
+            <i class="fas fa-language" aria-hidden="true"></i>
+            <button type="button" class="language-option active" data-language-option="ja"
+                aria-pressed="true">日本語</button>
+            <button type="button" class="language-option" data-language-option="en"
+                aria-pressed="false">EN</button>
+        </div>
     </header>
 
     <div class="manual-layout">
@@ -374,6 +406,13 @@
                 <h2><i class="fas fa-play"></i> 2. 起動方法</h2>
                 <h3>公開ページで使う</h3>
                 <p>公開されている easyDataScience のページをブラウザで開きます。インストールは不要です。</p>
+                <h3>表示言語を切り替える</h3>
+                <p data-i18n-en="Use the Japanese / EN control at the top of the page to switch the interface, result guidance, learning guide, manual, and AI assistance between Japanese and English without reloading.">
+                    ページ上部の「日本語 / EN」で、操作画面、結果説明、学習ガイド、マニュアル、生成AI支援を再読み込みなしで切り替えられます。
+                </p>
+                <p data-i18n-en="Your choice is saved in this browser and shared by the app and manual. Column names, file names, class labels, and entered values remain unchanged as user data.">
+                    選択した言語はブラウザに保存され、アプリとマニュアルで共有されます。列名、ファイル名、クラス名、入力値などのユーザーデータは翻訳されません。
+                </p>
                 <h3>ローカルで使う</h3>
                 <p>リポジトリを手元に置いて使う場合は、プロジェクトルートでローカルサーバーを起動します。</p>
                 <pre class="manual-code">python3 -m http.server 8765</pre>
@@ -404,7 +443,13 @@
                 <h3>良い例</h3>
                 <table class="manual-table">
                     <thead>
-                        <tr><th>面積</th><th>築年数</th><th>駅距離</th><th>部屋数</th><th>価格</th></tr>
+                        <tr>
+                            <th data-i18n-en="Floor area">面積</th>
+                            <th data-i18n-en="Building age">築年数</th>
+                            <th data-i18n-en="Distance to station">駅距離</th>
+                            <th data-i18n-en="Rooms">部屋数</th>
+                            <th data-i18n-en="Price">価格</th>
+                        </tr>
                     </thead>
                     <tbody>
                         <tr><td>65</td><td>12</td><td>8</td><td>3</td><td>4200</td></tr>
@@ -623,7 +668,7 @@
                     <li>テストスコアと交差検証スコアを両方見る</li>
                     <li>モデル保存が必要な場合はファイナライズ後に JSON をダウンロードする</li>
                 </ul>
-                <p style="margin-top: 1.5rem; color: #64748b;">最終更新: 2026-05-04</p>
+                <p style="margin-top: 1.5rem; color: #64748b;">最終更新: 2026-08-29</p>
             </section>
         </main>
     </div>
@@ -654,6 +699,10 @@
                 link.classList.toggle('active', link.getAttribute('href') === `#${current}`);
             });
         });
+    </script>
+    <script type="module">
+        import { initializeI18n } from './js/i18n.js';
+        initializeI18n();
     </script>
 </body>
 

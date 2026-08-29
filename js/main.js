@@ -3,6 +3,7 @@
 // ==========================================
 import { showError, showLoadingMessage, hideLoadingMessage, toggleCollapsible, renderDataPreview, renderSummaryStatistics } from './utils.js';
 import { setupAIAssistSettingsUI, clearAIAssistPanelContext } from './ai_assistant.js';
+import { initializeI18n } from './i18n.js';
 
 // ==========================================
 // Global Variables
@@ -34,6 +35,8 @@ const aiStatusBadge = document.getElementById('ai-status-badge');
 // ==========================================
 // Initialization
 // ==========================================
+initializeI18n();
+
 document.addEventListener('DOMContentLoaded', () => {
     loadingScreen.style.display = 'none';
     mainApp.style.display = 'block';

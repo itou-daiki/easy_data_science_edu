@@ -149,7 +149,7 @@ function renderOverview(data, chars) {
                         const type = chars.numericColumns.includes(col) ? '数値' :
                                      chars.categoricalColumns.includes(col) ? 'カテゴリ' : 'テキスト';
                         const sample = values.slice(0, 3).join(', ');
-                        return `<tr><td><strong>${col}</strong></td><td>${type}</td><td>${unique}</td><td>${missing}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">${sample}</td></tr>`;
+                        return `<tr><td><strong data-i18n-ignore>${col}</strong></td><td>${type}</td><td>${unique}</td><td>${missing}</td><td data-i18n-ignore style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">${sample}</td></tr>`;
                     }).join('')}
                 </tbody>
             </table>
@@ -276,7 +276,7 @@ function renderMissing(data, allCols) {
                 <tbody>
                     ${missingCols.map(m => `
                         <tr>
-                            <td><strong>${m.col}</strong></td>
+                            <td><strong data-i18n-ignore>${m.col}</strong></td>
                             <td>${m.missing}</td>
                             <td>${m.rate.toFixed(1)}%</td>
                             <td>${m.rate > 50 ? '<span style="color:#ef4444;">要注意</span>' : m.rate > 20 ? '<span style="color:#f59e0b;">注意</span>' : '<span style="color:#10b981;">軽微</span>'}</td>

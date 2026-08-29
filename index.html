@@ -159,8 +159,16 @@
                     <span id="ai-status-badge" class="ai-status-badge">未設定</span>
                 </button>
             </div>
-            <div style="position: absolute; top: 1.5rem; right: 1.5rem; z-index: 10;">
-                <a href="manual.html" target="_blank" class="btn-demo" style="text-decoration: none; display: inline-flex; align-items: center; gap: 0.5rem; background: rgba(255, 255, 255, 0.2); color: white; border: 1px solid rgba(255, 255, 255, 0.4); padding: 0.5rem 1rem;">
+            <div class="hero-action-right">
+                <div class="language-switch language-switch-on-dark" role="group"
+                    data-language-switch data-i18n-ignore aria-label="表示言語">
+                    <i class="fas fa-language" aria-hidden="true"></i>
+                    <button type="button" class="language-option active" data-language-option="ja"
+                        aria-pressed="true">日本語</button>
+                    <button type="button" class="language-option" data-language-option="en"
+                        aria-pressed="false">EN</button>
+                </div>
+                <a href="manual.html" target="_blank" class="btn-demo manual-link-button">
                     <i class="fas fa-book-open"></i> 使い方マニュアル
                 </a>
             </div>

@@ -1,6 +1,7 @@
 // ==========================================
 // UI Helpers for easyDataScience
 // ==========================================
+import { tr } from './i18n.js';
 
 /**
  * Toggles the visibility of a collapsible section.
@@ -29,7 +30,7 @@ export function showLoadingMessage(message) {
 export function hideLoadingMessage() {
     const uploadText = document.querySelector('.upload-text');
     if (uploadText) {
-        uploadText.textContent = 'ここにファイルをドラッグ＆ドロップ';
+        uploadText.textContent = tr('ここにファイルをドラッグ＆ドロップ');
     }
 }
 
@@ -38,7 +39,7 @@ export function hideLoadingMessage() {
  * @param {string} message
  */
 export function showError(message) {
-    alert(`エラー: ${message}`);
+    alert(`${tr('エラー:')} ${tr(message)}`);
     hideLoadingMessage();
 }
 
@@ -77,10 +78,10 @@ export function renderDataPreview(containerId, data, title = 'データプレビ
     const displayData = data.slice(0, maxRows);
 
     let html = `<div class="table-container"><table class="table">`;
-    html += '<thead><tr>';
+    html += '<thead data-i18n-ignore><tr>';
     html += '<th>#</th>';
     columns.forEach(col => html += `<th>${col}</th>`);
-    html += '</tr></thead><tbody>';
+    html += '</tr></thead><tbody data-i18n-ignore>';
 
     displayData.forEach((row, i) => {
         html += `<tr><td>${i + 1}</td>`;
@@ -134,7 +135,7 @@ export function renderSummaryStatistics(containerId, data, characteristics, titl
     html += '<thead><tr><th>変数</th><th>件数</th><th>平均</th><th>標準偏差</th><th>最小</th><th>Q1</th><th>中央値</th><th>Q3</th><th>最大</th><th>欠損</th></tr></thead><tbody>';
     stats.forEach(s => {
         const fmt = v => typeof v === 'number' ? v.toFixed(3) : v;
-        html += `<tr><td><strong>${s.col}</strong></td><td>${s.count}</td><td>${fmt(s.mean)}</td><td>${fmt(s.std)}</td><td>${fmt(s.min)}</td><td>${fmt(s.q1)}</td><td>${fmt(s.median)}</td><td>${fmt(s.q3)}</td><td>${fmt(s.max)}</td><td>${s.missing}</td></tr>`;
+        html += `<tr><td><strong data-i18n-ignore>${s.col}</strong></td><td>${s.count}</td><td>${fmt(s.mean)}</td><td>${fmt(s.std)}</td><td>${fmt(s.min)}</td><td>${fmt(s.q1)}</td><td>${fmt(s.median)}</td><td>${fmt(s.q3)}</td><td>${fmt(s.max)}</td><td>${s.missing}</td></tr>`;
     });
     html += '</tbody></table></div>';
     container.innerHTML = html;
@@ -150,7 +151,7 @@ export function renderSummaryStatistics(containerId, data, characteristics, titl
 export function createSelect(id, options, placeholder = '選択してください') {
     let html = `<select id="${id}" class="form-select">`;
     html += `<option value="">${placeholder}</option>`;
-    options.forEach(opt => html += `<option value="${opt}">${opt}</option>`);
+    options.forEach(opt => html += `<option value="${opt}" data-i18n-ignore>${opt}</option>`);
     html += '</select>';
     return html;
 }
@@ -168,7 +169,7 @@ export function createVariableChips(name, options, selected = []) {
         const isSelected = selected.includes(opt);
         html += `<label class="variable-chip ${isSelected ? 'selected' : ''}" data-name="${name}" data-value="${opt}">
             <input type="checkbox" name="${name}" value="${opt}" ${isSelected ? 'checked' : ''} style="display:none;">
-            ${opt}
+            <span data-i18n-ignore>${opt}</span>
         </label>`;
     });
     html += '</div>';

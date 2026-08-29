@@ -1215,7 +1215,7 @@ export function render(container, _data, _characteristics) {
 
     container.innerHTML = `
         ${buildStyles()}
-        <div class="lg-container">
+        <div class="lg-container" data-i18n-scope="learning">
             <h2 style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.25rem;">
                 <i class="fas fa-graduation-cap" style="color:${THEME.primary};"></i>
                 機械学習 学習ガイド

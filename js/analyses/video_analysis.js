@@ -56,6 +56,12 @@ const DEFAULT_TAG_DEFS = [
     { id: 'tag-shot', label: 'シュート', color: '#2563eb', hotkey: '3' },
     { id: 'tag-pass', label: 'パス', color: '#f59e0b', hotkey: '4' }
 ];
+const DEFAULT_TAG_EN = {
+    'グッドプレー': 'Good play',
+    'ミス': 'Mistake',
+    'シュート': 'Shot',
+    'パス': 'Pass'
+};
 
 let _idSeq = 1;
 function _newId(prefix) { return `${prefix}-${Date.now().toString(36)}-${_idSeq++}`; }
@@ -149,7 +155,7 @@ function _getMediaTime(t) {
 // ==========================================
 function _buildLayout() {
     return `
-    <div class="va-root" style="--va-theme: ${THEME}; --va-theme-light: ${THEME_LIGHT}; --va-theme-border: ${THEME_BORDER};">
+    <div class="va-root" data-i18n-scope="video" style="--va-theme: ${THEME}; --va-theme-light: ${THEME_LIGHT}; --va-theme-border: ${THEME_BORDER};">
         <h2><i class="fas fa-film" style="color: ${THEME};"></i> 動画分析ツール</h2>
         <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
             ローカル動画・画像をブラウザで読み込み、コマ送り再生・描画アノテーション・タグ記録・2メディア比較・MoveNet ポーズ推定をブラウザ内で完結します。
@@ -1052,7 +1058,7 @@ function _refreshTagDefs() {
     container.innerHTML = _state.tagDefs.map(def => `
         <div class="va-tag-def" data-id="${def.id}" style="--c:${def.color}">
             <span class="va-tag-swatch" style="background:${def.color};"></span>
-            <input type="text" class="va-tag-label-input" value="${_escape(def.label)}">
+            <input type="text" class="va-tag-label-input" value="${_escape(def.label)}"${DEFAULT_TAG_EN[def.label] ? ` data-i18n-value-en="${DEFAULT_TAG_EN[def.label]}"` : ''}>
             <input type="color" class="va-tag-color-input" value="${def.color}">
             <input type="text" class="va-tag-hotkey-input" value="${def.hotkey || ''}" maxlength="1" placeholder="key" style="width:3rem;">
             <button class="va-btn va-tag-def-delete"><i class="fas fa-times"></i></button>
@@ -1062,7 +1068,12 @@ function _refreshTagDefs() {
     container.querySelectorAll('.va-tag-def').forEach(row => {
         const id = row.dataset.id;
         const def = _state.tagDefs.find(d => d.id === id);
-        row.querySelector('.va-tag-label-input').addEventListener('input', (e) => { def.label = e.target.value; _refreshQuickbar(); _refreshTagList(); });
+        row.querySelector('.va-tag-label-input').addEventListener('input', (e) => {
+            e.target.removeAttribute('data-i18n-value-en');
+            def.label = e.target.value;
+            _refreshQuickbar();
+            _refreshTagList();
+        });
         row.querySelector('.va-tag-color-input').addEventListener('input', (e) => {
             def.color = e.target.value;
             row.style.setProperty('--c', e.target.value);

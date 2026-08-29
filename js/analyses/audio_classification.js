@@ -356,7 +356,7 @@ function renderClasses(container, state) {
                     padding: 1rem; margin-bottom: 1rem; background: white;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
                 <h4 style="margin: 0; color: ${ACCENT};">
-                    <i class="fas fa-tag"></i> ${cls.name}
+                    <i class="fas fa-tag"></i> <span data-i18n-ignore>${cls.name}</span>
                     <span style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 400;">
                         (${cls.samples.length} サンプル)
                     </span>

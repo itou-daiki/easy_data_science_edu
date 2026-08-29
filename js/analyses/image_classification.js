@@ -197,6 +197,10 @@ function showSuccess(container, message) {
 }
 
 function createClassCard(classData, classIndex) {
+    const defaultNameMatch = classData.name.match(/^クラス (\d+)$/);
+    const translatedValue = defaultNameMatch
+        ? ` data-i18n-value-en="Class ${defaultNameMatch[1]}"`
+        : '';
     const thumbnailsHtml = classData.thumbnails
         .map((thumb, i) => `
             <div style="position: relative; display: inline-block;">
@@ -224,7 +228,7 @@ function createClassCard(classData, classIndex) {
                                 justify-content: center; color: ${THEME_COLOR}; font-weight: 700; font-size: 0.85rem;">
                         ${classIndex + 1}
                     </div>
-                    <input type="text" class="ic-class-name" data-class="${classIndex}"
+                    <input type="text" class="ic-class-name" data-class="${classIndex}"${translatedValue}
                            value="${classData.name}" placeholder="クラス名を入力"
                            style="border: 1px solid var(--border-color); border-radius: 6px;
                                   padding: 0.4rem 0.75rem; font-size: 0.9rem; width: 180px;">
@@ -675,6 +679,7 @@ function setupSetupEventListeners(container, getState, setState) {
     // Class name inputs — use 'input' event for immediate updates
     container.querySelectorAll('.ic-class-name').forEach(input => {
         input.addEventListener('input', () => {
+            input.removeAttribute('data-i18n-value-en');
             const classIdx = parseInt(input.dataset.class, 10);
             const currentState = getState();
             const newClasses = currentState.classes.map((c, i) =>

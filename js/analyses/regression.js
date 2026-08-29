@@ -129,7 +129,7 @@ export function render(container, data, characteristics) {
         const features = numCols.filter(c => c !== target);
         featureChips.innerHTML = features.map(f =>
             `<label class="variable-chip selected" data-value="${f}">
-                <input type="checkbox" value="${f}" checked style="display:none;"> ${f}
+                <input type="checkbox" value="${f}" checked style="display:none;"> <span data-i18n-ignore>${f}</span>
             </label>`
         ).join('');
 
@@ -241,11 +241,11 @@ async function runComparison(container, data, characteristics) {
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1.5rem;">
                     <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
                         <i class="fas fa-check-circle"></i>
-                        <span>目的変数: <strong>${targetCol}</strong></span>
+                        <span>目的変数: <strong data-i18n-ignore>${targetCol}</strong></span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
                         <i class="fas fa-check-circle"></i>
-                        <span>特徴量: <strong>${featureNames.length}個</strong></span>
+                        <span>特徴量: <strong data-i18n-en="${featureNames.length}">${featureNames.length}個</strong></span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 0.5rem; color: #15803d;">
                         <i class="fas fa-check-circle"></i>
@@ -1011,7 +1011,7 @@ async function runInterpretModel(container, result, featureNames) {
         html += '<p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 0.5rem;">各特徴量が予測値にどう影響するかを可視化します。</p>';
         html += '<div style="margin-bottom: 1rem;"><label style="font-weight: 600; margin-right: 0.5rem;">特徴量を選択:</label>';
         html += `<select id="pdp-feature-select" class="form-select" style="display: inline-block; width: auto;">
-            ${featureNames.map((f, i) => `<option value="${i}">${f}</option>`).join('')}
+            ${featureNames.map((f, i) => `<option value="${i}" data-i18n-ignore>${f}</option>`).join('')}
         </select></div>`;
         html += '<div id="pdp-plot"></div>';
 
@@ -1596,7 +1596,7 @@ function renderPredictInput(featureName, index) {
     if (spec?.type === 'categorical' && spec.categories?.length) {
         return `
             <div>
-                <label style="font-weight: 600; font-size: 0.85rem; display: block; margin-bottom: 0.25rem;">${label}</label>
+                <label data-i18n-ignore style="font-weight: 600; font-size: 0.85rem; display: block; margin-bottom: 0.25rem;">${label}</label>
                 <select id="pred-${index}" class="form-select" style="width: 100%;">
                     <option value="">選択してください</option>
                     ${spec.categories.map(v => `<option value="${_escapeHtml(String(v))}">${_escapeHtml(String(v))}</option>`).join('')}
@@ -1606,7 +1606,7 @@ function renderPredictInput(featureName, index) {
     }
     return `
         <div>
-            <label style="font-weight: 600; font-size: 0.85rem; display: block; margin-bottom: 0.25rem;">${label}</label>
+            <label data-i18n-ignore style="font-weight: 600; font-size: 0.85rem; display: block; margin-bottom: 0.25rem;">${label}</label>
             <input type="number" id="pred-${index}" class="form-select" step="any" placeholder="値を入力" style="width: 100%;">
         </div>
     `;
@@ -1870,7 +1870,7 @@ function renderCoefficientTable(rows) {
                 <tbody>
                     ${rows.map(row => `
                         <tr>
-                            <td><strong>${row.name}</strong></td>
+                            <td><strong data-i18n-ignore>${row.name}</strong></td>
                             <td>${formatNumber(row.coef)}</td>
                             <td>${formatNumber(row.abs)}</td>
                             <td>${row.coef > 0 ? '増えると予測値が上がる傾向' : row.coef < 0 ? '増えると予測値が下がる傾向' : 'ほぼ影響なし'}</td>
@@ -1896,7 +1896,7 @@ function renderImportanceTable(featureNames, importances) {
                 <tbody>
                     ${rows.map(row => `
                         <tr>
-                            <td><strong>${row.name}</strong></td>
+                            <td><strong data-i18n-ignore>${row.name}</strong></td>
                             <td>${formatNumber(row.importance)}</td>
                             <td>大きいほど分岐や予測に使われた度合いが高い</td>
                         </tr>

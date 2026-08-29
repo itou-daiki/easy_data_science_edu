@@ -156,7 +156,7 @@ function renderMissingTab(data, allCols) {
                             reason = 'カテゴリ変数の標準的な方法';
                         }
                         return `<tr>
-                            <td><strong>${m.col}</strong></td>
+                            <td><strong data-i18n-ignore>${m.col}</strong></td>
                             <td>${m.missing}</td>
                             <td>${m.rate.toFixed(1)}%</td>
                             <td><span style="color: #1e90ff; font-weight: 600;">${method}</span></td>
@@ -207,7 +207,7 @@ function renderScalingTab(data, numCols) {
                 <tbody>
                     ${stats.map(s => `
                         <tr>
-                            <td><strong>${s.col}</strong></td>
+                            <td><strong data-i18n-ignore>${s.col}</strong></td>
                             <td>${formatNumber(s.min)}</td>
                             <td>${formatNumber(s.max)}</td>
                             <td>${formatNumber(s.range)}</td>
@@ -268,9 +268,9 @@ function renderEncodingTab(data, catCols, numCols) {
                             method = 'Label Encoding（高カーディナリティ）';
                         }
                         return `<tr>
-                            <td><strong>${c.col}</strong></td>
+                            <td><strong data-i18n-ignore>${c.col}</strong></td>
                             <td>${c.uniqueCount}</td>
-                            <td>${c.values.join(', ')}${c.uniqueCount > 5 ? '...' : ''}</td>
+                            <td data-i18n-ignore>${c.values.join(', ')}${c.uniqueCount > 5 ? '...' : ''}</td>
                             <td>${c.isNumericCoded ? '数値' : '文字列'}</td>
                             <td><span style="color: #1e90ff; font-weight: 600;">${method}</span></td>
                         </tr>`;

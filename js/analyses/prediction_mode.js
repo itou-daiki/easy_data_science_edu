@@ -348,15 +348,15 @@ export function render(container, _data, _characteristics) {
                     </div>
                     <div style="background: #f5f3ff; padding: 0.75rem 1rem; border-radius: 8px;">
                         <div style="font-size: 0.8rem; color: #64748b;">目的変数</div>
-                        <div style="font-weight: 600;">${data.targetCol}</div>
+                        <div style="font-weight: 600;" data-i18n-ignore>${data.targetCol}</div>
                     </div>
                     <div style="background: #f5f3ff; padding: 0.75rem 1rem; border-radius: 8px;">
                         <div style="font-size: 0.8rem; color: #64748b;">特徴量数</div>
-                        <div style="font-weight: 600;">${data.featureNames.length}個</div>
+                        <div style="font-weight: 600;" data-i18n-en="${data.featureNames.length}">${data.featureNames.length}個</div>
                     </div>
                     <div style="background: #f5f3ff; padding: 0.75rem 1rem; border-radius: 8px;">
                         <div style="font-size: 0.8rem; color: #64748b;">データセット</div>
-                        <div style="font-weight: 600;">${data.datasetName}</div>
+                        <div style="font-weight: 600;" data-i18n-ignore>${data.datasetName}</div>
                     </div>
                     <div style="background: #f5f3ff; padding: 0.75rem 1rem; border-radius: 8px;">
                         <div style="font-size: 0.8rem; color: #64748b;">エクスポート日</div>
@@ -366,7 +366,7 @@ export function render(container, _data, _characteristics) {
                 ${data.classLabels ? `
                     <div style="margin-top: 0.75rem; background: #f5f3ff; padding: 0.75rem 1rem; border-radius: 8px;">
                         <div style="font-size: 0.8rem; color: #64748b;">クラス</div>
-                        <div style="font-weight: 600;">${data.classLabels.join(', ')}</div>
+                        <div style="font-weight: 600;" data-i18n-ignore>${data.classLabels.join(', ')}</div>
                     </div>
                 ` : ''}
             </div>
@@ -380,11 +380,11 @@ export function render(container, _data, _characteristics) {
         const featureInputs = data.featureNames.map((name, i) => {
             const encoder = loadedEncoders?.get(i);
             if (encoder) {
-                const options = encoder._classes.map(c => `<option value="${c}">${c}</option>`).join('');
+                const options = encoder._classes.map(c => `<option value="${c}" data-i18n-ignore>${c}</option>`).join('');
                 return `
                     <div style="margin-bottom: 0.75rem;">
                         <label style="display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 0.25rem; color: #374151;">
-                            ${name} <span style="color: #a78bfa; font-size: 0.75rem;">(カテゴリ)</span>
+                            <span data-i18n-ignore>${name}</span> <span style="color: #a78bfa; font-size: 0.75rem;">(カテゴリ)</span>
                         </label>
                         <select id="pm-feat-${i}" class="pm-input" style="
                             width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db;
@@ -396,7 +396,7 @@ export function render(container, _data, _characteristics) {
             return `
                 <div style="margin-bottom: 0.75rem;">
                     <label style="display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 0.25rem; color: #374151;">
-                        ${name} <span style="color: #64748b; font-size: 0.75rem;">(数値)</span>
+                        <span data-i18n-ignore>${name}</span> <span style="color: #64748b; font-size: 0.75rem;">(数値)</span>
                     </label>
                     <input type="number" id="pm-feat-${i}" class="pm-input" step="any" style="
                         width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db;
@@ -472,7 +472,7 @@ export function render(container, _data, _characteristics) {
                         <p style="font-size: 3rem; font-weight: 700; color: ${THEME}; margin: 0.5rem 0;">
                             ${formatNumber(prediction[0], 4)}
                         </p>
-                        <p style="font-size: 0.85rem; color: #64748b;">目的変数: ${data.targetCol}</p>
+                        <p style="font-size: 0.85rem; color: #64748b;">目的変数: <span data-i18n-ignore>${data.targetCol}</span></p>
                     </div>
                 `;
             } else {
@@ -492,7 +492,7 @@ export function render(container, _data, _characteristics) {
                                     ${classLabels.map((label, idx) => {
                                         const p = proba[0][idx] || 0;
                                         return `<div style="display: flex; align-items: center; margin: 0.35rem 0;">
-                                            <span style="width: 100px; font-size: 0.85rem; flex-shrink: 0;">${label}</span>
+                                            <span style="width: 100px; font-size: 0.85rem; flex-shrink: 0;" data-i18n-ignore>${label}</span>
                                             <div style="flex: 1; background: #e2e8f0; border-radius: 4px; height: 22px; margin: 0 0.5rem;">
                                                 <div style="width: ${(p * 100).toFixed(1)}%; background: ${THEME}; border-radius: 4px; height: 100%; transition: width 0.5s;"></div>
                                             </div>
@@ -509,9 +509,9 @@ export function render(container, _data, _characteristics) {
                     <div style="background: white; border-radius: 12px; padding: 2rem; margin-top: 1.5rem; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
                         <p style="font-size: 0.9rem; color: #64748b;">予測結果 (${data.modelInfo.name})</p>
                         <p style="font-size: 3rem; font-weight: 700; color: ${THEME}; margin: 0.5rem 0;">
-                            ${predictedLabel}
+                            <span data-i18n-ignore>${predictedLabel}</span>
                         </p>
-                        <p style="font-size: 0.85rem; color: #64748b;">目的変数: ${data.targetCol}</p>
+                        <p style="font-size: 0.85rem; color: #64748b;">目的変数: <span data-i18n-ignore>${data.targetCol}</span></p>
                         ${probaHtml}
                     </div>
                 `;
